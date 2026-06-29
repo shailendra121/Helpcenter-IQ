@@ -1,0 +1,10 @@
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.zip binary
+
+# Keep generated/vendor-ish folders out of GitHub language stats
+zendesk-app/translations/* linguist-generated=false
