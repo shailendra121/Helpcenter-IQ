@@ -1,0 +1,8 @@
+{
+  "app": {
+    "name": "HelpCenterIQ",
+    "short_description": "Find knowledge gaps in Zendesk tickets and turn them into better help center content.",
+    "long_description": "HelpCenterIQ analyzes Zendesk support tickets to identify missing, weak, or outdated help center articles and recommends content improvements that reduce repeat tickets. It clusters repeated customer questions, compares them against your existing Zendesk Guide content, classifies coverage gaps, and generates draft articles for your team to review and publish — nothing is auto-published. A dashboard surfaces the highest-impact gaps by estimated ticket volume so your knowledge team can prioritize what to write or fix next.",
+    "installation_instructions": "Click Install, then connect your Zendesk Support and Zendesk Guide accounts via OAuth when prompted. Choose a ticket history window (30/60/90 days) for the first analysis run from the HelpCenterIQ dashboard in the nav bar."
+  }
+}
