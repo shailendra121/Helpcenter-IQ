@@ -1,0 +1,16 @@
+# Default owners for everything, unless a later match overrides.
+*                           @helpcenteriq/maintainers
+
+# Architecture decisions need broader sign-off.
+/docs/adr/                  @helpcenteriq/maintainers @helpcenteriq/leads
+
+# Backend / AI pipeline / data handling — security-sensitive.
+/server/src/ai/             @helpcenteriq/backend @helpcenteriq/security
+/server/src/pii/            @helpcenteriq/backend @helpcenteriq/security
+/server/src/auth/           @helpcenteriq/backend @helpcenteriq/security
+/server/src/db/migrations/  @helpcenteriq/backend
+
+/zendesk-app/                @helpcenteriq/frontend
+/dashboard/                  @helpcenteriq/frontend
+
+/infra/                      @helpcenteriq/devops
