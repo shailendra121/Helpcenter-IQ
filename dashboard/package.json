@@ -1,0 +1,22 @@
+{
+  "name": "@helpcenteriq/dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HelpCenterIQ dashboard UI, served by server/ and rendered inside the ZAF iframe.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "lint": "eslint src --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "vite": "^5.4.2",
+    "typescript": "^5.5.4",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "eslint": "^9.9.0"
+  }
+}
