@@ -35,6 +35,7 @@ What this makes easier, harder, or constrains going forward.
 |---|---|---|
 | [0001](./0001-server-side-zaf-architecture.md) | Server-side ZAF architecture (not pure client-side, not native-only) | Accepted |
 | [0002](./0002-database-postgres-pgvector.md) | Single Postgres + pgvector store (not Zendesk Custom Objects, not separate vector DB) | Accepted |
-| [0003](./0003-ai-provider-abstraction-and-pii-masking.md) | AI provider abstraction, zero-data-retention, PII masking | Accepted |
+| [0003](./0003-ai-provider-abstraction-and-pii-masking.md) | AI provider abstraction, zero-data-retention, PII masking | Accepted (amended by 0006) |
 | [0004](./0004-zendesk-auth-global-oauth.md) | Zendesk authentication via global OAuth | Accepted |
 | [0005](./0005-account-tiers-trial-sponsored-marketplace.md) | Zendesk account strategy: trial → sponsored → Marketplace registration | Accepted |
+| [0006](./0006-google-gemini-default-ai-provider.md) | Google Gemini as the default AI provider (free tier for dev, paid tier for production) | Accepted |

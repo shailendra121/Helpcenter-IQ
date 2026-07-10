@@ -25,7 +25,7 @@ smart-commit integration links the commit to the issue automatically:
 ```
 feat(ai): add provider-agnostic embedding interface
 
-Adds AIProvider interface and the Anthropic implementation behind it,
+Adds AIProvider interface and the Gemini implementation behind it,
 per ADR-0003. OpenAI implementation follows in a separate ticket.
 
 Refs: HCIQ-23

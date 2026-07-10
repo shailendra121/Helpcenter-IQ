@@ -80,7 +80,7 @@ If you only remember five things from this document, those are the five.
         │  jobs/        scheduled/background analysis runs       │
         │  pii/         mandatory masking before any AI call     │
         │  ai/          provider-agnostic interface + impls      │
-        │               (Anthropic, swappable)                   │
+        │               (Gemini, swappable)                      │
         │  db/          Postgres + pgvector — accounts, runs,     │
         │               knowledge_gaps, draft_articles, audit_logs│
         └──────────────────────────┬───────────────────────────┘

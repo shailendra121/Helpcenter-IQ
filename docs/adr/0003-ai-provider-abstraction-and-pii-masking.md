@@ -1,6 +1,6 @@
 # ADR-0003: AI provider abstraction, zero-data-retention, PII masking
 
-- Status: Accepted
+- Status: Accepted (amended by [ADR-0006](./0006-google-gemini-default-ai-provider.md) — default provider is Google Gemini; ZDR requirement scoped to customer-data environments)
 - Date: 2026-06-29
 - Jira: HCIQ-3
 
