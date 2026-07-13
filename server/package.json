@@ -12,25 +12,27 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "migrate": "node-pg-migrate -m src/db/migrations",
-"migrate:up": "node-pg-migrate up -m src/db/migrations",
-"migrate:down": "node-pg-migrate down -m src/db/migrations"
+    "migrate:up": "node-pg-migrate up -m src/db/migrations",
+    "migrate:down": "node-pg-migrate down -m src/db/migrations"
   },
   "dependencies": {
+    "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
     "pg": "^8.12.0",
     "pgvector": "^0.2.0",
-    "jsonwebtoken": "^9.0.2",
-    "zod": "^3.23.8",
-    "dotenv": "^16.4.5"
+    "zod": "^3.23.8"
   },
   "devDependencies": {
-    "typescript": "^5.5.4",
-    "tsx": "^4.16.5",
-    "vitest": "^2.0.5",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^20.14.15",
+    "@types/supertest": "^7.2.0",
     "eslint": "^9.9.0",
     "node-pg-migrate": "^7.6.1",
-    "@types/express": "^4.17.21",
-    "@types/node": "^20.14.15",
-    "@types/jsonwebtoken": "^9.0.6"
+    "supertest": "^7.2.2",
+    "tsx": "^4.16.5",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
   }
 }

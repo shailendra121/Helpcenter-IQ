@@ -1,5 +1,3 @@
-import React from "react";
-
 /**
  * Knowledge Gap Dashboard — top missing articles, most repeated
  * questions, estimated ticket volume per gap, suggested priority.
