@@ -1,12 +1,6 @@
 import { describe, it, expect } from "vitest";
 import request from "supertest";
-import express from "express";
-
-const app = express();
-app.use(express.json());
-app.get("/health", (_req, res) => {
-  res.status(200).json({ status: "ok", service: "helpcenteriq-server" });
-});
+import app from "../../src/app";
 
 describe("GET /health", () => {
   it("returns 200 with status ok", async () => {
