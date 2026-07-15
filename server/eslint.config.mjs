@@ -2,11 +2,11 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
+  { ignores: ["src/db/migrations/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
     files: ["**/*.ts"],
-    ignores: ["src/db/migrations/**"],
     languageOptions: {
       parserOptions: {
         ecmaVersion: "latest",
@@ -19,8 +19,5 @@ export default tseslint.config(
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
     },
-  },
-  {
-    ignores: ["src/db/migrations/**"],
   }
 );

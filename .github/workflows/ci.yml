@@ -24,7 +24,7 @@ jobs:
         run: npm ci
       - run: npm run lint
       - run: npm run typecheck
-      - run: npm test -- --ci
+      - run: npm test
 
   dashboard:
     name: Dashboard — lint, typecheck, build
@@ -57,4 +57,14 @@ jobs:
         with:
           node-version: "20"
       - run: npm install -g @zendesk/zcli
-      - run: zcli apps:validate
+      - name: Validate ZAF package
+        env:
+          ZENDESK_SUBDOMAIN: ${{ secrets.ZENDESK_SUBDOMAIN }}
+          ZENDESK_EMAIL: ${{ secrets.ZENDESK_EMAIL }}
+          ZENDESK_API_TOKEN: ${{ secrets.ZENDESK_API_TOKEN }}
+        run: |
+          if [ -z "$ZENDESK_SUBDOMAIN" ]; then
+            echo "::warning::Zendesk credentials not configured — skipping apps:validate"
+          else
+            zcli apps:validate
+          fi
