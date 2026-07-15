@@ -20,7 +20,14 @@
   "frameworkVersion": "2.0",
   "oauth": {
     "client_id": "REPLACE_AFTER_MARKETPLACE_REGISTRATION",
-    "client_secret": "stored server-side only — never committed"
+    "client_secret": "stored server-side only — never committed",
+    "authorize_uri": "https://app.helpcenteriq.example/oauth/authorize",
+    "access_token_uri": "https://app.helpcenteriq.example/oauth/token"
   },
-  "parameters": []
+  "parameters": [
+    {
+      "name": "token",
+      "type": "oauth"
+    }
+  ]
 }
