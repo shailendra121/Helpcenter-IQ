@@ -1,21 +1,20 @@
 import type { AIProvider } from "./AIProvider.js";
-import { AnthropicProvider } from "./AnthropicProvider.js";
+import { GeminiProvider } from "./GeminiProvider.js";
 
 /**
- * Single point of provider selection. Per ADR-0003, this is the only
- * place that should branch on AI_PROVIDER — everywhere else in the
+ * Single point of provider selection. Per ADR-0003/ADR-0006, this is the
+ * only place that should branch on AI_PROVIDER — everywhere else in the
  * codebase should depend on the AIProvider interface, not a vendor.
  */
 export function createAIProvider(): AIProvider {
-  const providerName = process.env.AI_PROVIDER ?? "anthropic";
+  const providerName = process.env.AI_PROVIDER ?? "gemini";
 
   switch (providerName) {
-    case "anthropic": {
-      const apiKey = process.env.ANTHROPIC_API_KEY;
-      if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set");
-      return new AnthropicProvider(apiKey);
+    case "gemini": {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
+      return new GeminiProvider(apiKey);
     }
-    // case "openai": return new OpenAIProvider(...) — add when needed.
     default:
       throw new Error(`Unknown AI_PROVIDER: ${providerName}`);
   }
