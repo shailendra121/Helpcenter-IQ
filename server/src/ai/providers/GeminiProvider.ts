@@ -11,6 +11,19 @@ const EMBEDDING_MODEL = process.env.GEMINI_EMBEDDING_MODEL ?? "gemini-embedding-
 const EMBEDDING_DIMENSION = 1536; // must match pgvector column dimension in init-schema migration
 
 /**
+ * gemini-embedding-001 only auto-normalizes output at the default 3072
+ * dimensions. Since we request a truncated 1536-dim vector (Matryoshka
+ * Representation Learning), Google's docs require manual unit-normalization
+ * here, or cosine/dot-product similarity in pgvector will be subtly wrong.
+ * See: https://ai.google.dev/gemini-api/docs/embeddings
+ */
+export function normalize(vector: number[]): number[] {
+  const magnitude = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
+  if (magnitude === 0) return vector;
+  return vector.map((val) => val / magnitude);
+}
+
+/**
  * Google Gemini implementation of AIProvider.
  *
  * Per ADR-0003 (amended by ADR-0006): free tier is dev/test only, with
@@ -38,7 +51,7 @@ export class GeminiProvider implements AIProvider {
       throw new Error("Gemini embedContent returned no embedding values");
     }
 
-    return { vector: values, model: EMBEDDING_MODEL };
+    return { vector: normalize(values), model: EMBEDDING_MODEL };
   }
 
   async draftArticle(_request: DraftArticleRequest): Promise<DraftArticleResult> {
