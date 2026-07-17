@@ -10,3 +10,4 @@ describe("GET /health", () => {
     expect(res.body.service).toBe("helpcenteriq-server");
   });
 });
+
