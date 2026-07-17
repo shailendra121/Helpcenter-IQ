@@ -56,3 +56,4 @@ describe("normalize()", () => {
     expect(normalize([0, 0, 0])).toEqual([0, 0, 0]);
   });
 });
+
