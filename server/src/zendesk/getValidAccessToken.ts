@@ -57,7 +57,7 @@ export async function getValidAccessToken(subdomain: string): Promise<string> {
     });
 
     return tokens.accessToken;
-  } catch (err) {
+  } catch {
     // Refresh failed — most likely the grant was revoked in Zendesk.
     // Never log the raw error (may contain token fragments).
     console.error("Token refresh failed for subdomain:", subdomain);

@@ -86,7 +86,7 @@ router.get("/zendesk/oauth/callback", async (req, res) => {
       expiresAt: tokens.expiresAt,
     });
 
-res.redirect(`/zaf/dashboard?origin=${encodeURIComponent(pending.subdomain)}`);  } catch (err) {
+res.redirect(`/zaf/dashboard?origin=${encodeURIComponent(pending.subdomain)}`);  } catch  {
     // Never log/return the raw error, which could contain token data
     // from a failed exchange response.
     console.error("OAuth token exchange failed for subdomain:", pending.subdomain);
@@ -125,7 +125,7 @@ router.post("/zaf/dashboard", async (req, res) => {
     const publicKeyPem = fs.readFileSync(publicKeyPath, "utf8");
     const installationId = process.env.ZENDESK_MARKETPLACE_APP_ID ?? "";
     claims = verifyZafJwt(token, publicKeyPem, installationId) as typeof claims;
-  } catch (err) {
+  } catch  {
     console.error("ZAF JWT verification failed");
     return res.status(401).send("Invalid signature.");
   }
