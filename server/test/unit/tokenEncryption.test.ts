@@ -1,6 +1,15 @@
 import "dotenv/config";
-import { describe, it, expect } from "vitest";
 import { encryptToken, decryptToken } from "../../src/auth/tokenEncryption.js";
+import { describe, it, expect } from "vitest";
+
+
+// Provide a deterministic test-only key if none is set (e.g. in CI),
+// so this pure unit test — which never touches a real network or DB —
+// doesn't depend on secrets being configured. Never use this value for
+// anything beyond this test file.
+process.env.TOKEN_ENCRYPTION_KEY =
+  process.env.TOKEN_ENCRYPTION_KEY ?? "0".repeat(64);
+
 
 describe("tokenEncryption", () => {
   it("encrypts and decrypts a token back to the original value", () => {
