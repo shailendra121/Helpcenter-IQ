@@ -1,7 +1,20 @@
 import "dotenv/config";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import request from "supertest";
-import app from "../../src/app.js";
+
+// Mock fs so this test doesn't depend on a real public key file existing
+// on disk (won't exist in CI) — we only care that middleware order lets
+// req.body.token through, not real JWT validity here.
+vi.mock("fs", () => ({
+  default: {
+    readFileSync: vi.fn().mockReturnValue("dummy-public-key-content"),
+  },
+}));
+
+process.env.ZAF_APP_PUBLIC_KEY_PATH =
+  process.env.ZAF_APP_PUBLIC_KEY_PATH ?? "./fake-path-for-tests.pem";
+
+const { default: app } = await import("../../src/app.js");
 
 describe("POST /zaf/dashboard", () => {
   it("reads the token from urlencoded form body (not undefined)", async () => {
