@@ -1,4 +1,4 @@
-import { ZendeskOAuthClient } from "../auth/ZendeskOAuthClient.js";
+import { getOAuthClient } from "../auth/getOAuthClient.js";
 import { encryptToken, decryptToken } from "../auth/tokenEncryption.js";
 import {
   findZendeskAccountBySubdomain,
@@ -37,14 +37,8 @@ export async function getValidAccessToken(subdomain: string): Promise<string> {
     throw new ReAuthRequiredError(subdomain);
   }
 
-  const clientId = process.env.ZENDESK_OAUTH_CLIENT_ID;
-  const clientSecret = process.env.ZENDESK_OAUTH_CLIENT_SECRET;
-  if (!clientId || !clientSecret) {
-    throw new Error("ZENDESK_OAUTH_CLIENT_ID / ZENDESK_OAUTH_CLIENT_SECRET are not set");
-  }
-
   try {
-    const client = new ZendeskOAuthClient(clientId, clientSecret);
+    const client = getOAuthClient();
     const refreshToken = decryptToken(account.oauth_refresh_token_encrypted);
     const tokens = await client.refreshAccessToken(subdomain, refreshToken);
 

@@ -4,6 +4,7 @@ import fs from "fs";
 import { Router } from "express";
 import crypto from "crypto";
 import { ZendeskOAuthClient } from "../auth/ZendeskOAuthClient.js";
+import { getOAuthClient } from "../auth/getOAuthClient.js";
 import { encryptToken } from "../auth/tokenEncryption.js";
 import { upsertZendeskAccount } from "../db/models/zendeskAccounts.js";
 
@@ -14,15 +15,6 @@ const router = Router();
 // MVP single-instance dev/trial use.
 const pendingStates = new Map<string, { subdomain: string; createdAt: number }>();
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-
-function getOAuthClient(): ZendeskOAuthClient {
-  const clientId = process.env.ZENDESK_OAUTH_CLIENT_ID;
-  const clientSecret = process.env.ZENDESK_OAUTH_CLIENT_SECRET;
-  if (!clientId || !clientSecret) {
-    throw new Error("ZENDESK_OAUTH_CLIENT_ID / ZENDESK_OAUTH_CLIENT_SECRET are not set");
-  }
-  return new ZendeskOAuthClient(clientId, clientSecret);
-}
 
 function getRedirectUri(req: import("express").Request): string {
   // Must exactly match the redirect_uri registered with the Zendesk
