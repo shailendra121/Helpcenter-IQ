@@ -3,7 +3,6 @@ import { findZendeskAccountBySubdomain } from "../db/models/zendeskAccounts.js";
 import fs from "fs";
 import { Router } from "express";
 import crypto from "crypto";
-import { ZendeskOAuthClient } from "../auth/ZendeskOAuthClient.js";
 import { getOAuthClient } from "../auth/getOAuthClient.js";
 import { encryptToken } from "../auth/tokenEncryption.js";
 import { upsertZendeskAccount } from "../db/models/zendeskAccounts.js";
