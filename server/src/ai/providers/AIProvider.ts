@@ -40,3 +40,5 @@ export interface AIProvider {
 
   draftArticle(request: DraftArticleRequest): Promise<DraftArticleResult>;
 }
+
+
