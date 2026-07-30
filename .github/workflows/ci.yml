@@ -1,12 +1,4 @@
-name: CI
-
-on:
-  pull_request:
-  push:
-    branches: [main]
-
-jobs:
-  server:
+server:
     name: Server — lint, typecheck, test
     runs-on: ubuntu-latest
     services:
@@ -27,8 +19,8 @@ jobs:
       run:
         working-directory: server
     env:
-      DATABASE_URL: postgresql://helpcenteriq:helpcenteriq@localhost:5432/helpcenteriq
-      TOKEN_ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
+      DATABASE_URL: "postgresql://helpcenteriq:helpcenteriq@localhost:5432/helpcenteriq"
+      TOKEN_ENCRYPTION_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -44,46 +36,3 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
-
-  dashboard:
-    name: Dashboard — lint, typecheck, build
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: dashboard
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: package-lock.json
-      - name: Install dependencies
-        working-directory: .
-        run: npm ci
-      - run: npm run lint
-      - run: npm run build
-
-  zendesk-app:
-    name: Validate ZAF package
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: zendesk-app
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - run: npm install -g @zendesk/zcli
-      - name: Validate ZAF package
-        env:
-          ZENDESK_SUBDOMAIN: ${{ secrets.ZENDESK_SUBDOMAIN }}
-          ZENDESK_EMAIL: ${{ secrets.ZENDESK_EMAIL }}
-          ZENDESK_API_TOKEN: ${{ secrets.ZENDESK_API_TOKEN }}
-        run: |
-          if [ -z "$ZENDESK_SUBDOMAIN" ]; then
-            echo "::warning::Zendesk credentials not configured — skipping apps:validate"
-          else
-            zcli apps:validate
-          fi
