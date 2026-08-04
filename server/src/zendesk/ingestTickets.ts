@@ -82,7 +82,7 @@ export async function ingestTickets(
       for (const rawTicket of page.tickets) {
         // API's start_time filters by update time; enforce the
         // creation-time window here (see comment above / PR review).
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        
         const createdAt = rawTicket.created_at ? new Date(rawTicket.created_at) : null;
         if (!createdAt || createdAt < windowStart) {
           continue;
