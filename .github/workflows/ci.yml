@@ -9,9 +9,26 @@ jobs:
   server:
     name: Server — lint, typecheck, test
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: helpcenteriq
+          POSTGRES_PASSWORD: helpcenteriq
+          POSTGRES_DB: helpcenteriq
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: server
+    env:
+      DATABASE_URL: "postgresql://helpcenteriq:helpcenteriq@localhost:5432/helpcenteriq"
+      TOKEN_ENCRYPTION_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,6 +39,8 @@ jobs:
       - name: Install dependencies
         working-directory: .
         run: npm ci
+      - name: Run migrations
+        run: npm run migrate:up
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
