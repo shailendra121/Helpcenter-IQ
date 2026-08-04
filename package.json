@@ -3,7 +3,10 @@
   "private": true,
   "version": "0.1.0",
   "description": "HelpCenterIQ — AI-powered knowledge gap intelligence for Zendesk.",
-  "workspaces": ["server", "dashboard"],
+  "workspaces": [
+    "server",
+    "dashboard"
+  ],
   "scripts": {
     "dev:server": "npm run dev --workspace=server",
     "dev:dashboard": "npm run dev --workspace=dashboard",
