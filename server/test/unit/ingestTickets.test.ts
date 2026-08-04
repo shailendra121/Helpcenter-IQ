@@ -1,8 +1,21 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockFetchTicketPage = vi.fn();
 vi.mock("../../src/zendesk/ticketFetcher.js", () => ({
   fetchTicketPage: mockFetchTicketPage,
+}));
+
+const mockGetCopilotFieldIds = vi.fn();
+vi.mock("../../src/zendesk/ticketFieldsLookup.js", () => ({
+  getCopilotFieldIds: mockGetCopilotFieldIds,
+  extractCopilotValue: (
+    customFields: Array<{ id: number; value: unknown }> | undefined,
+    fieldId: number | undefined
+  ) => {
+    if (!customFields || fieldId === undefined) return null;
+    const field = customFields.find((f) => f.id === fieldId);
+    return typeof field?.value === "string" ? field.value : null;
+  },
 }));
 
 const mockUpsertTicket = vi.fn();
@@ -27,8 +40,16 @@ const { ingestTickets } = await import("../../src/zendesk/ingestTickets.js");
 
 describe("ingestTickets", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-  });
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-01-15T00:00:00Z"));
+
+  vi.clearAllMocks();
+  mockGetCopilotFieldIds.mockResolvedValue(new Map());
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
   it("ingests all tickets across multiple pages and marks the run complete", async () => {
     mockCreateAnalysisRun.mockResolvedValue({ id: 1 });

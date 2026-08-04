@@ -27,12 +27,13 @@ describe("ticket idempotency (real database)", () => {
     runId = run.id;
   });
 
-  afterAll(async () => {
-    // Clean up test data — CASCADE handles tickets/analysis_runs.
-    await pool.query("DELETE FROM zendesk_accounts WHERE id = $1", [accountId]);
-    await pool.end();
-  });
-
+ afterAll(async () => {
+  await pool.query("DELETE FROM zendesk_accounts WHERE id = $1", [accountId]);
+  // Note: intentionally NOT calling pool.end() here — pool is a shared
+  // singleton (server/src/db/pool.ts) used across all test files. Ending
+  // it here would break other test files if Vitest ever runs them in
+  // the same worker/thread (flagged in PR review).
+});
   it("upserting the same ticket twice does not create a duplicate row", async () => {
     const ticketInput = {
       zendeskAccountId: accountId,

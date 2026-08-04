@@ -8,10 +8,7 @@ export interface FetchedTicket {
   tags: string[];
   created_at: string;
   generated_timestamp: number;
-  custom_status_id?: number;
-  topic?: string;
-  sentiment?: string;
-  intent?: string;
+  custom_fields?: Array<{ id: number; value: unknown }>;
 }
 
 interface IncrementalExportResponse {
