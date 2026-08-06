@@ -56,6 +56,10 @@ describe("ingestGuideArticles", () => {
     );
     expect(mockEmbed).toHaveBeenCalledOnce();
     expect(mockUpdateArticleEmbedding).toHaveBeenCalledOnce();
+    // Assert the actual dimension, not just that embed() was called —
+    // per reviewer: the mock returns 1536 but nothing was checking it.
+    const [, , embeddingArg] = mockUpdateArticleEmbedding.mock.calls[0];
+    expect(embeddingArg).toHaveLength(1536);
   });
 
   it("stores draft article metadata but does NOT generate an embedding", async () => {

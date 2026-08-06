@@ -39,6 +39,16 @@ exports.up = (pgm) => {
   });
 
   pgm.createIndex("guide_articles", "zendesk_account_id");
+  // IVFFlat index for scalable similarity search — flagged by reviewer:
+// without this, findNearestArticles() does a full table scan, fine for
+// a 23-article trial but won't scale to a real help center. lists=100
+// is a reasonable default for small-to-medium datasets; per pgvector
+// docs, tune upward as row count grows (~rows/1000).
+pgm.sql(`
+  CREATE INDEX guide_articles_embedding_idx ON guide_articles
+  USING ivfflat (embedding vector_cosine_ops)
+  WITH (lists = 100);
+`);
 };
 
 exports.down = (pgm) => {

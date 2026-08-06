@@ -23,12 +23,11 @@ const MAX_RETRIES = 5;
 
 /**
  * Fetches one page of Guide articles via Zendesk's Incremental Article
- * Export API — same rationale as HCIQ-8's ticket fetcher: purpose-built
- * for bulk sync, avoids the 1,000-result cap of offset pagination, and
- * returns any article whose metadata changed since start_time (used for
- * incremental refresh).
- *
- * Retries on 429 with exponential backoff, honoring Retry-After.
+ * Export API. Uses time-based pagination (this endpoint has no cursor
+ * option, unlike the Ticket API) — per Zendesk's own documented pattern:
+ * "if next_page is present, use end_time as the next start_time"
+ * (see: developer.zendesk.com/.../using-the-help-center-api-to-manage-article-translations).
+ * end_of_stream-equivalent here is next_page === null.
  */
 export async function fetchArticlePage(
   subdomain: string,
