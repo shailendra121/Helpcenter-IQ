@@ -33,10 +33,27 @@ export interface DraftArticleResult {
   model: string;
 }
 
+export interface GenerateTextRequest {
+  /** Already PII-masked prompt text. */
+  prompt: string;
+}
+
+export interface GenerateTextResult {
+  text: string;
+  model: string;
+}
+
 export interface AIProvider {
   readonly name: string;
 
   embed(request: EmbeddingRequest): Promise<EmbeddingResult>;
 
   draftArticle(request: DraftArticleRequest): Promise<DraftArticleResult>;
+  /**
+   * Generic text generation — used for lightweight tasks like cluster
+   * labeling (HCIQ-10) that don't need draftArticle()'s full
+   * structured-article output. Callers must mask PII before calling,
+   * same rule as embed().
+   */
+  generateText(request: GenerateTextRequest): Promise<GenerateTextResult>;
 }
