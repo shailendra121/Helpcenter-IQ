@@ -38,7 +38,7 @@ Respond with EXACTLY two lines, no extra text:
 Label: <a short 2-5 word topic name>
 Summary: <one sentence describing what this cluster of tickets is about>`;
 
-const { text } = await withRetry(() => provider.generateText({ prompt }));
+  const { text } = await withRetry(() => provider.generateText({ prompt }));
 
   const labelMatch = text.match(/Label:\s*(.+)/i);
   const summaryMatch = text.match(/Summary:\s*(.+)/i);

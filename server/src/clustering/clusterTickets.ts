@@ -15,8 +15,8 @@ export interface ClusteringConfig {
 
 export function getDefaultClusteringConfig(): ClusteringConfig {
   return {
-    similarityThreshold: Number(process.env.CLUSTERING_SIMILARITY_THRESHOLD ?? 0.75),
-    minClusterSize: Number(process.env.CLUSTERING_MIN_CLUSTER_SIZE ?? 3),
+    similarityThreshold: Number(process.env.CLUSTERING_SIMILARITY_THRESHOLD ?? 0.70),
+    minClusterSize: Number(process.env.CLUSTERING_MIN_CLUSTER_SIZE ?? 2),
   };
 }
 
@@ -37,19 +37,11 @@ export interface ClusteringOutput {
 }
 
 /**
- * Greedy threshold-based clustering over ticket embeddings.
- *
  * Chosen over more complex options (HDBSCAN, agglomerative) per this
  * story's "start simple, don't over-engineer" guidance — documented on
- * the ticket. For each ticket, in fetch order: join the first existing
- * cluster whose centroid similarity exceeds similarityThreshold, or
- * start a new cluster. This is O(n * k) where k = cluster count, which
- * is fine at MVP data volumes; a proper library-based approach (e.g.
- * HDBSCAN via a Python service) is a reasonable follow-up if/when
- * ticket volume or cluster quality demands it.
- *
- * Clusters smaller than minClusterSize are moved to the unclustered
- * bucket rather than surfaced as low-signal/singleton "topics."
+ * the ticket. For each ticket, in fetch order: join the best matching
+ * existing cluster whose centroid similarity exceeds
+ * similarityThreshold, or start a new cluster.
  */
 export function clusterEmbeddings(
   tickets: Array<{ id: number; vector: number[] }>,

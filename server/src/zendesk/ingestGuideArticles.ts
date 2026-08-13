@@ -60,6 +60,9 @@ async function processArticle(
   const cleanText = cleanArticleBody(article.body);
   const updatedAt = new Date(article.updated_at);
 
+  // Check the OLD stored value BEFORE upserting — otherwise upsert
+  // overwrites zendesk_updated_at first, making every article look
+  // "unchanged" against its own freshly-written value.
   const storedUpdatedAt = await getStoredArticleUpdatedAt(zendeskAccountId, article.id);
 
   await upsertArticleMetadata({

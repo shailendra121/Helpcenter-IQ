@@ -8,7 +8,7 @@ import type {
   GenerateTextRequest,
   GenerateTextResult,
 } from "./AIProvider.js";
-const GENERATION_MODEL = process.env.GEMINI_GENERATION_MODEL ?? "gemini-3.5-flash";
+const GENERATION_MODEL = process.env.GEMINI_GENERATION_MODEL ?? "gemini-3.5-flash-lite";
 const EMBEDDING_MODEL = process.env.GEMINI_EMBEDDING_MODEL ?? "gemini-embedding-001";
 const EMBEDDING_DIMENSION = 1536; // must match pgvector column dimension in init-schema migration
 

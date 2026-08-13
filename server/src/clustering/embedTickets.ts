@@ -1,6 +1,9 @@
 import { createAIProvider } from "../ai/providers/index.js";
 import { maskPII } from "../pii/maskPII.js";
-import { getTicketsNeedingEmbedding, updateTicketEmbedding } from "../db/models/tickets.js";
+import {
+  getTicketsNeedingEmbedding,
+  updateTicketEmbedding,
+} from "../db/models/tickets.js";
 import { withRetry } from "../ai/withRetry.js";
 
 /**
@@ -28,7 +31,7 @@ export async function embedTickets(
     }
 
     const { maskedText } = maskPII(rawText);
-   const { vector } = await withRetry(() => provider.embed({ text: maskedText }));
+    const { vector } = await withRetry(() => provider.embed({ text: maskedText }));
     await updateTicketEmbedding(ticket.id, vector);
     embedded++;
   }

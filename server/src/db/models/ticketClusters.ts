@@ -17,36 +17,44 @@ export interface CreateClusterInput {
  * runs — see HCIQ-10's migration for the rationale.
  */
 export async function createTicketCluster(input: CreateClusterInput): Promise<number> {
-  const clusterResult = await pool.query<{ id: number }>(
-    `INSERT INTO ticket_clusters
-       (zendesk_account_id, analysis_run_id, topic_label, topic_summary,
-        ticket_count, centroid_embedding, representative_ticket_ids)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING id`,
-    [
-      input.zendeskAccountId,
-      input.analysisRunId,
-      input.topicLabel,
-      input.topicSummary,
-      input.memberTicketIds.length,
-      `[${input.centroidEmbedding.join(",")}]`,
-      input.representativeTicketIds,
-    ]
-  );
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
 
-  const clusterId = clusterResult.rows[0].id;
-
-  // Insert membership rows. Simple loop is fine at MVP data volumes;
-  // a bulk INSERT would be a reasonable optimization if ticket counts
-  // per run grow large.
-  for (const ticketId of input.memberTicketIds) {
-    await pool.query(
-      `INSERT INTO ticket_cluster_members (cluster_id, ticket_id) VALUES ($1, $2)`,
-      [clusterId, ticketId]
+    const clusterResult = await client.query<{ id: number }>(
+      `INSERT INTO ticket_clusters
+         (zendesk_account_id, analysis_run_id, topic_label, topic_summary,
+          ticket_count, centroid_embedding, representative_ticket_ids)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id`,
+      [
+        input.zendeskAccountId,
+        input.analysisRunId,
+        input.topicLabel,
+        input.topicSummary,
+        input.memberTicketIds.length,
+        `[${input.centroidEmbedding.join(",")}]`,
+        input.representativeTicketIds,
+      ]
     );
-  }
 
-  return clusterId;
+    const clusterId = clusterResult.rows[0].id;
+
+    for (const ticketId of input.memberTicketIds) {
+      await client.query(
+        `INSERT INTO ticket_cluster_members (cluster_id, ticket_id) VALUES ($1, $2)`,
+        [clusterId, ticketId]
+      );
+    }
+
+    await client.query("COMMIT");
+    return clusterId;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export interface TicketClusterRow {
@@ -69,4 +77,18 @@ export async function getClustersForRun(
     [zendeskAccountId, analysisRunId]
   );
   return result.rows;
+}
+/**
+ * Deletes existing clusters for a run before re-clustering — makes
+ * runClustering() idempotent, so re-running doesn't duplicate rows.
+ * Membership rows in ticket_cluster_members cascade-delete automatically.
+ */
+export async function deleteClustersForRun(
+  zendeskAccountId: number,
+  analysisRunId: number
+): Promise<void> {
+  await pool.query(
+    `DELETE FROM ticket_clusters WHERE zendesk_account_id = $1 AND analysis_run_id = $2`,
+    [zendeskAccountId, analysisRunId]
+  );
 }
