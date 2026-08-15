@@ -1,5 +1,6 @@
 import { embedTickets } from "./embedTickets.js";
-import { clusterTicketsForRun, getDefaultClusteringConfig } from "./clusterTickets.js";
+import { getDefaultClusteringConfig } from "./clusterTickets.js";
+import { clusterTicketsForRunSQL } from "./clusterTicketsSQL.js";
 import { generateClusterLabel } from "./generateClusterLabel.js";
 import { createTicketCluster, deleteClustersForRun } from "../db/models/ticketClusters.js";
 import { getTicketsByIds } from "../db/models/tickets.js";
@@ -30,7 +31,7 @@ export async function runClustering(
   await deleteClustersForRun(zendeskAccountId, analysisRunId);
 
   const config = getDefaultClusteringConfig();
-  const { clusters, unclusteredTicketIds } = await clusterTicketsForRun(
+  const { clusters, unclusteredTicketIds } = await clusterTicketsForRunSQL(
     zendeskAccountId,
     analysisRunId,
     config
