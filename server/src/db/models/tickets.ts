@@ -91,6 +91,14 @@ export async function getTicketsNeedingEmbedding(
  * Returns all tickets for an account within an analysis run that DO
  * have an embedding — used as input to the clustering step itself.
  */
+/**
+ * Returns all tickets for an account within an analysis run that DO
+ * have an embedding — used as input to the clustering step itself.
+ * Ordered by id for deterministic clustering: the greedy algorithm is
+ * order-dependent (whichever ticket is processed first seeds a
+ * cluster), so without a fixed order, the same input data could
+ * cluster differently between runs (flagged during review).
+ */
 export async function getEmbeddedTicketsForRun(
   zendeskAccountId: number,
   analysisRunId: number
@@ -98,7 +106,8 @@ export async function getEmbeddedTicketsForRun(
   const result = await pool.query<TicketForClustering>(
     `SELECT id, zendesk_ticket_id, subject, description, embedding
      FROM tickets
-     WHERE zendesk_account_id = $1 AND analysis_run_id = $2 AND embedding IS NOT NULL`,
+     WHERE zendesk_account_id = $1 AND analysis_run_id = $2 AND embedding IS NOT NULL
+     ORDER BY id`,
     [zendeskAccountId, analysisRunId]
   );
   return result.rows;

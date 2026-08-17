@@ -29,13 +29,24 @@ interface WorkingCluster {
 export interface ClusterResult {
   memberTicketIds: number[];
   centroid: number[];
+  memberVectors: number[][];
 }
 
 export interface ClusteringOutput {
   clusters: ClusterResult[];
   unclusteredTicketIds: number[];
 }
-
+/**
+ * NOTE: clusterTicketsForRun() below (the DB-connected wrapper around
+ * this pure algorithm) is no longer called in production — 
+ * runClustering.ts uses clusterTicketsForRunSQL() (clusterTicketsSQL.ts)
+ * instead, per the scalability fix from review. This file is kept
+ * intentionally: clusterEmbeddings() is the pure, in-memory reference
+ * implementation of the algorithm, and its unit tests
+ * (clusterTickets.test.ts) verify correctness independent of the SQL
+ * execution strategy. getDefaultClusteringConfig() here is also still
+ * the shared config source for both implementations.
+ */
 /**
  * Chosen over more complex options (HDBSCAN, agglomerative) per this
  * story's "start simple, don't over-engineer" guidance — documented on
@@ -79,8 +90,12 @@ export function clusterEmbeddings(
 
   for (const cluster of workingClusters) {
     if (cluster.memberTicketIds.length >= config.minClusterSize) {
-      clusters.push({ memberTicketIds: cluster.memberTicketIds, centroid: cluster.centroid });
-    } else {
+clusters.push({
+        memberTicketIds: cluster.memberTicketIds,
+        centroid: cluster.centroid,
+        memberVectors: cluster.memberVectors,
+      });
+        } else {
       unclusteredTicketIds.push(...cluster.memberTicketIds);
     }
   }

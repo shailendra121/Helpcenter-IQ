@@ -4,9 +4,10 @@ import { clusterTicketsForRunSQL } from "./clusterTicketsSQL.js";
 import { generateClusterLabel } from "./generateClusterLabel.js";
 import { createTicketCluster, deleteClustersForRun } from "../db/models/ticketClusters.js";
 import { getTicketsByIds } from "../db/models/tickets.js";
-
+import { pool } from "../db/pool.js";
 
 const MAX_REPRESENTATIVE_TICKETS = 5;
+const FALLBACK_LABEL = "Unlabeled cluster";
 
 export interface ClusteringRunResult {
   clustersCreated: number;
@@ -40,14 +41,28 @@ export async function runClustering(
   let clustersCreated = 0;
 
   for (const cluster of clusters) {
-    try {
-      const representativeIds = cluster.memberTicketIds.slice(0, MAX_REPRESENTATIVE_TICKETS);
-      const representativeTickets = await getTicketsByIds(representativeIds);
+    const representativeIds = cluster.memberTicketIds.slice(0, MAX_REPRESENTATIVE_TICKETS);
+    const representativeTickets = await getTicketsByIds(representativeIds);
 
-      const { label, summary } = await generateClusterLabel(
+    // Label generation fail-safe (per review): a cluster with real
+    // customer tickets is too much to lose silently for a
+    // support-facing feature. If labeling fails, fall back to a
+    // placeholder label and still persist the cluster and its
+    // tickets, rather than dropping them.
+    let label = FALLBACK_LABEL;
+    let summary = "";
+
+    try {
+      const generated = await generateClusterLabel(
         representativeTickets.map((t) => ({ subject: t.subject, description: t.description }))
       );
+      label = generated.label;
+      summary = generated.summary;
+    } catch (err) {
+      await logClusteringIssue(zendeskAccountId, analysisRunId, cluster.memberTicketIds.length, err);
+    }
 
+    try {
       await createTicketCluster({
         zendeskAccountId,
         analysisRunId,
@@ -55,18 +70,14 @@ export async function runClustering(
         topicSummary: summary,
         centroidEmbedding: cluster.centroid,
         memberTicketIds: cluster.memberTicketIds,
+        memberVectors: cluster.memberVectors,
         representativeTicketIds: representativeIds,
       });
-
       clustersCreated++;
     } catch (err) {
-      // Error isolation fix (per review): one cluster's label-generation
-      // failure shouldn't abort the whole run — log and continue so the
-      // remaining clusters still get processed.
-      console.error(
-        `Failed to process a cluster with ${cluster.memberTicketIds.length} tickets:`,
-        err
-      );
+      // A genuine persistence failure (not a labeling failure) is
+      // still isolated per-cluster, but logged the same durable way.
+      await logClusteringIssue(zendeskAccountId, analysisRunId, cluster.memberTicketIds.length, err);
     }
   }
 
@@ -75,4 +86,33 @@ export async function runClustering(
     ticketsClustered: clusters.reduce((sum, c) => sum + c.memberTicketIds.length, 0),
     ticketsUnclustered: unclusteredTicketIds.length,
   };
+}
+
+/**
+ * Logs clustering issues to audit_logs (queryable, not just a
+ * console.error that scrolls away) so a real failure gets noticed
+ * rather than silently passing.
+ */
+async function logClusteringIssue(
+  zendeskAccountId: number,
+  analysisRunId: number,
+  ticketCount: number,
+  err: unknown
+): Promise<void> {
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(`Cluster processing issue (run ${analysisRunId}, ${ticketCount} tickets):`, err);
+  try {
+    await pool.query(
+      `INSERT INTO audit_logs (zendesk_account_id, event_type, detail_json)
+       VALUES ($1, $2, $3)`,
+      [
+        zendeskAccountId,
+        "clustering_cluster_processing_failed",
+        JSON.stringify({ analysisRunId, ticketCount, error: message }),
+      ]
+    );
+  } catch {
+    // If even the audit log write fails, the console.error above is
+    // the last line of defense — don't let logging itself crash the run.
+  }
 }

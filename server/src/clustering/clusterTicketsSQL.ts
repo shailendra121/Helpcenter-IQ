@@ -29,7 +29,16 @@ export async function clusterTicketsForRunSQL(
   const tickets = embeddedTickets
     .filter((t): t is typeof t & { embedding: string } => t.embedding !== null)
     .map((t) => ({ id: t.id, vector: parseVector(t.embedding) }));
-
+// Each ticket does 2-3 sequential DB round trips with no transaction
+  // wrapping the read-then-write (nearest-cluster lookup, then either
+  // an UPDATE or INSERT into clustering_working_clusters). This is
+  // safe ONLY under the assumption that a single account/run has at
+  // most one clustering job running at a time — concurrent runs for
+  // the same (zendeskAccountId, analysisRunId) could race on the same
+  // working-cluster rows. HCIQ-14's concurrency guard (one active run
+  // per account) is expected to enforce this; flagged here so the
+  // assumption isn't silent if that guard is ever bypassed or removed.
+  
   for (const ticket of tickets) {
     const vectorStr = `[${ticket.vector.join(",")}]`;
 
@@ -100,6 +109,11 @@ export async function clusterTicketsForRunSQL(
     [zendeskAccountId, analysisRunId]
   );
 
+  // Build a ticket-id -> vector lookup so each final cluster's
+  // memberVectors can be populated (per review: needed to compute
+  // each member's distance from the centroid when persisting).
+  const vectorById = new Map(tickets.map((t) => [t.id, t.vector]));
+
   const clusters: ClusterResult[] = [];
   const unclusteredTicketIds: number[] = [];
 
@@ -108,6 +122,7 @@ export async function clusterTicketsForRunSQL(
       clusters.push({
         memberTicketIds: row.member_ticket_ids,
         centroid: parseVector(row.centroid),
+        memberVectors: row.member_ticket_ids.map((id) => vectorById.get(id)!),
       });
     } else {
       unclusteredTicketIds.push(...row.member_ticket_ids);
