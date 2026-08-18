@@ -185,4 +185,28 @@ describe("ingestGuideArticles", () => {
     expect(result.articlesSeen).toBe(2);
     expect(mockFetchArticlePage).toHaveBeenCalledTimes(2);
   });
+
+  it("skips embedding when article body produces empty clean text", async () => {
+    mockFetchArticlePage.mockResolvedValueOnce({
+      articles: [
+        {
+          id: 8,
+          title: "Empty article",
+          body: "", // or null — nothing to embed
+          locale: "en-us",
+          draft: false,
+          section_id: 100,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      next_page: null,
+      end_time: 1700000000,
+    });
+
+    const result = await ingestGuideArticles(1, "d3v-astonous");
+
+    expect(result.articlesSkipped).toBe(1);
+    expect(mockEmbed).not.toHaveBeenCalled();
+  });
 });

@@ -60,3 +60,73 @@ export async function countTicketsForAccount(zendeskAccountId: number): Promise<
   );
   return parseInt(result.rows[0].count, 10);
 }
+
+export interface TicketForClustering {
+  id: number;
+  zendesk_ticket_id: string;
+  subject: string | null;
+  description: string | null;
+  embedding: string | null;
+}
+
+/**
+ * Returns tickets for an account within an analysis run that don't yet
+ * have an embedding — used by the clustering pipeline (HCIQ-10) to
+ * avoid re-embedding tickets that were already processed in a prior run.
+ */
+export async function getTicketsNeedingEmbedding(
+  zendeskAccountId: number,
+  analysisRunId: number
+): Promise<TicketForClustering[]> {
+  const result = await pool.query<TicketForClustering>(
+    `SELECT id, zendesk_ticket_id, subject, description, embedding
+     FROM tickets
+     WHERE zendesk_account_id = $1 AND analysis_run_id = $2 AND embedding IS NULL`,
+    [zendeskAccountId, analysisRunId]
+  );
+  return result.rows;
+}
+
+/**
+ * Returns all tickets for an account within an analysis run that DO
+ * have an embedding — used as input to the clustering step itself.
+ */
+/**
+ * Returns all tickets for an account within an analysis run that DO
+ * have an embedding — used as input to the clustering step itself.
+ * Ordered by id for deterministic clustering: the greedy algorithm is
+ * order-dependent (whichever ticket is processed first seeds a
+ * cluster), so without a fixed order, the same input data could
+ * cluster differently between runs (flagged during review).
+ */
+export async function getEmbeddedTicketsForRun(
+  zendeskAccountId: number,
+  analysisRunId: number
+): Promise<TicketForClustering[]> {
+  const result = await pool.query<TicketForClustering>(
+    `SELECT id, zendesk_ticket_id, subject, description, embedding
+     FROM tickets
+     WHERE zendesk_account_id = $1 AND analysis_run_id = $2 AND embedding IS NOT NULL
+     ORDER BY id`,
+    [zendeskAccountId, analysisRunId]
+  );
+  return result.rows;
+}
+
+export async function updateTicketEmbedding(ticketId: number, embedding: number[]): Promise<void> {
+  await pool.query(`UPDATE tickets SET embedding = $1 WHERE id = $2`, [
+    `[${embedding.join(",")}]`,
+    ticketId,
+  ]);
+}
+
+export async function getTicketsByIds(
+  ticketIds: number[]
+): Promise<Array<{ id: number; subject: string | null; description: string | null }>> {
+  if (ticketIds.length === 0) return [];
+  const result = await pool.query<{ id: number; subject: string | null; description: string | null }>(
+    `SELECT id, subject, description FROM tickets WHERE id = ANY($1)`,
+    [ticketIds]
+  );
+  return result.rows;
+}

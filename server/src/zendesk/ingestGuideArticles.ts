@@ -81,6 +81,14 @@ async function processArticle(
     return "skipped";
   }
 
+  // Guard against empty body — an article with no extractable text
+  // (e.g. body is null or only contains an image with no alt text)
+  // would otherwise send an empty string to embed(), which Gemini
+  // rejects with "requests must not be empty".
+  if (!cleanText.trim()) {
+    return "skipped";
+  }
+
   if (storedUpdatedAt && storedUpdatedAt.getTime() === updatedAt.getTime()) {
     return "skipped";
   }

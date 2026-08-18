@@ -5,8 +5,10 @@ import type {
   EmbeddingResult,
   DraftArticleRequest,
   DraftArticleResult,
+  GenerateTextRequest,
+  GenerateTextResult,
 } from "./AIProvider.js";
-
+const GENERATION_MODEL = process.env.GEMINI_GENERATION_MODEL ?? "gemini-3.5-flash-lite";
 const EMBEDDING_MODEL = process.env.GEMINI_EMBEDDING_MODEL ?? "gemini-embedding-001";
 const EMBEDDING_DIMENSION = 1536; // must match pgvector column dimension in init-schema migration
 
@@ -53,6 +55,19 @@ export class GeminiProvider implements AIProvider {
 
     return { vector: normalize(values), model: EMBEDDING_MODEL };
   }
+  async generateText(request: GenerateTextRequest): Promise<GenerateTextResult> {
+    const response = await this.client.models.generateContent({
+      model: GENERATION_MODEL,
+      contents: request.prompt,
+    });
+
+    const text = response.text;
+    if (!text) {
+      throw new Error("Gemini generateContent returned no text");
+    }
+
+    return { text, model: GENERATION_MODEL };
+  }
 
   async draftArticle(_request: DraftArticleRequest): Promise<DraftArticleResult> {
     // TODO(HCIQ-13): wire up Gemini generation call using prompts in
@@ -60,4 +75,3 @@ export class GeminiProvider implements AIProvider {
     throw new Error("Not implemented");
   }
 }
-
