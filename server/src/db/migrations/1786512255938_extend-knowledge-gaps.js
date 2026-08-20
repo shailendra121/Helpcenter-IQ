@@ -25,8 +25,19 @@ exports.up = (pgm) => {
     },
   });
 
-  // Fix related_guide_article_id: was `text` in init-schema, should be
+    // Fix related_guide_article_id: was `text` in init-schema, should be
   // an integer FK to guide_articles.id.
+  //
+  // USING NULL discards any existing value rather than attempting a
+  // cast — flagged during review as a destructive pattern. Confirmed
+  // safe at the time this ran: knowledge_gaps was a brand-new table
+  // with no rows yet, so nothing was actually lost. Not changed to a
+  // real cast (USING related_guide_article_id::integer) retroactively,
+  // since this migration has already been applied and editing the SQL
+  // itself here wouldn't re-run it — documenting for anyone reading
+  // this later, and as a reminder: any future ALTER COLUMN...TYPE on a
+  // column that may hold real data should use an explicit cast, not
+  // USING NULL.
   pgm.sql(`ALTER TABLE knowledge_gaps ALTER COLUMN related_guide_article_id DROP DEFAULT`);
   pgm.sql(`ALTER TABLE knowledge_gaps ALTER COLUMN related_guide_article_id TYPE integer USING NULL`);
   pgm.addConstraint("knowledge_gaps", "knowledge_gaps_related_guide_article_id_fkey", {

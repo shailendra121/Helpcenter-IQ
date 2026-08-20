@@ -53,7 +53,7 @@ export interface StalenessCheckInput {
  */
 export function isArticleOutdated(input: StalenessCheckInput): boolean {
   const staleDays = Number(process.env.GAP_STALE_ARTICLE_DAYS ?? 180);
-  const recentTicketThreshold = Number(process.env.GAP_STALE_RECENT_TICKETS ?? 3);
+  const recentTicketThreshold = Number(process.env.GAP_STALE_RECENT_TICKETS ?? 2);
 
   const daysSinceUpdate =
     (Date.now() - input.articleUpdatedAt.getTime()) / (1000 * 60 * 60 * 24);
@@ -103,14 +103,24 @@ Reason: <one sentence explaining why>`;
   const { maskedText } = maskPII(rawPrompt);
   const { text } = await withRetry(() => provider.generateText({ prompt: maskedText }));
 
-  const verdictMatch = text.match(/Verdict:\s*(YES|NO)/i);
+    const verdictMatch = text.match(/Verdict:\s*(YES|NO)/i);
   const reasonMatch = text.match(/Reason:\s*(.+)/i);
 
-  const isWeak = verdictMatch?.[1]?.toUpperCase() === "NO";
+  // Fail-safe on unparseable output: if the LLM's response doesn't
+  // match the expected format, we don't know whether the article is
+  // adequate — defaulting to "not weak" would silently treat an
+  // uncertain case as "fine," which is the wrong direction for a
+  // support-facing feature. Default to weak (needs human review)
+  // instead, per review.
+  const isWeak = verdictMatch ? verdictMatch[1].toUpperCase() === "NO" : true;
 
   return {
     isWeak,
-    justification: reasonMatch?.[1]?.trim() ?? "Unable to determine article adequacy.",
+    justification:
+      reasonMatch?.[1]?.trim() ??
+      (verdictMatch
+        ? "Unable to determine article adequacy."
+        : "AI response could not be parsed — flagged for manual review."),
   };
 }
 
@@ -159,7 +169,7 @@ export interface ClassifyGapResult {
  * the branches documented in the story's scope item #2.
  */
 export async function classifyGap(input: ClassifyGapInput): Promise<ClassifyGapResult> {
-  const similarityFloor = Number(process.env.GAP_SIMILARITY_FLOOR ?? 0.65);
+  const similarityFloor = Number(process.env.GAP_SIMILARITY_FLOOR ?? 0.55);
 
   const match = await findBestMatchingArticle(
     input.zendeskAccountId,
@@ -167,14 +177,18 @@ export async function classifyGap(input: ClassifyGapInput): Promise<ClassifyGapR
     similarityFloor
   );
 
-  if (!match) {
+    if (!match) {
     const classification: GapClassification = "missing";
     return {
       classification,
       relatedGuideArticleId: null,
       similarityScore: null,
       priorityScore: computePriorityScore(classification, input.ticketVolume),
-      justification: null,
+      // Synthesized justification (no LLM call needed) — same pattern
+      // as the Outdated branch below. Per review: every gap row must
+      // carry a justification, per HCIQ-11 scope item #4 and the
+      // acceptance criteria, including Missing.
+      justification: `No published article scored above the similarity threshold for this topic — no existing coverage was found.`,
     };
   }
 

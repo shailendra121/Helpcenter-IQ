@@ -60,7 +60,7 @@ describe("checkArticleWeakness — PII masking", () => {
     expect(result.justification).toBe("Article fully covers this.");
   });
 
-  it("defaults to weak with a fallback justification when the LLM response doesn't match the expected format", async () => {
+    it("defaults to weak with a fallback justification when the LLM response doesn't match the expected format", async () => {
     mockGenerateText.mockResolvedValue({
       text: "I'm not sure about this one.",
       model: "gemini-3.5-flash-lite",
@@ -73,8 +73,8 @@ describe("checkArticleWeakness — PII masking", () => {
       articleText: "Test content",
     });
 
-    expect(result.isWeak).toBe(false); // verdictMatch is null, so isWeak stays false (only true when explicitly "NO")
-    expect(result.justification).toBe("Unable to determine article adequacy.");
+    expect(result.isWeak).toBe(true); // fail-safe: unparseable response means we can't confirm the article is fine, so default to weak (needs review)
+    expect(result.justification).toBe("AI response could not be parsed — flagged for manual review.");
   });
 });
 
@@ -136,5 +136,33 @@ describe("computePriorityScore", () => {
     const highVolume = computePriorityScore("weak", 20);
 
     expect(highVolume).toBeGreaterThan(lowVolume);
+  });
+});
+
+describe("classifyGap — Missing classification justification (review fix)", () => {
+  it("returns a non-null justification when no article matches (Missing)", async () => {
+    const { classifyGap } = await import("../../src/classification/classifyGap.js");
+
+    // findBestMatchingArticle does a real pool.query — mock the pool
+    // module's query to return no rows, simulating no matching article.
+    const poolModule = await import("../../src/db/pool.js");
+    const originalQuery = poolModule.pool.query;
+    poolModule.pool.query = vi.fn().mockResolvedValue({ rows: [] });
+
+    try {
+      const result = await classifyGap({
+        zendeskAccountId: 1,
+        topicSummary: "Some topic with no coverage",
+        topicEmbedding: Array(1536).fill(0.1),
+        ticketVolume: 5,
+        representativeTicketExcerpts: ["A sample question"],
+      });
+
+      expect(result.classification).toBe("missing");
+      expect(result.justification).not.toBeNull();
+      expect(result.justification).toContain("No published article");
+    } finally {
+      poolModule.pool.query = originalQuery;
+    }
   });
 });
