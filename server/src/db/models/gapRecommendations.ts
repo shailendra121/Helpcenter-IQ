@@ -1,4 +1,5 @@
 import { pool } from "../pool.js";
+import type { PoolClient } from "pg";
 
 export interface CreateRecommendationInput {
   zendeskAccountId: number;
@@ -9,8 +10,13 @@ export interface CreateRecommendationInput {
   suggestedTitle: string | null;
 }
 
-export async function createRecommendation(input: CreateRecommendationInput): Promise<number> {
-  const result = await pool.query<{ id: number }>(
+export async function createRecommendation(
+  input: CreateRecommendationInput,
+  client?: PoolClient
+): Promise<number> {
+  const db = client ?? pool;
+
+  const result = await db.query<{ id: number }>(
     `INSERT INTO gap_recommendations
        (zendesk_account_id, gap_id, recommendation_type, rationale, suggested_keywords, suggested_title)
      VALUES ($1, $2, $3, $4, $5, $6)
@@ -31,8 +37,13 @@ export async function createRecommendation(input: CreateRecommendationInput): Pr
  * Deletes prior recommendations for a gap — regeneration replaces
  * previous recommendations, per HCIQ-12's scope item #3.
  */
-export async function deleteRecommendationsForGap(gapId: number): Promise<void> {
-  await pool.query(`DELETE FROM gap_recommendations WHERE gap_id = $1`, [gapId]);
+export async function deleteRecommendationsForGap(
+  gapId: number,
+  client?: PoolClient
+): Promise<void> {
+  const db = client ?? pool;
+
+  await db.query(`DELETE FROM gap_recommendations WHERE gap_id = $1`, [gapId]);
 }
 
 export interface GapRecommendationRow {

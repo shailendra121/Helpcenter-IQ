@@ -1,13 +1,12 @@
 /**
  * HCIQ-12 — Recommendation generation for non-Good knowledge gaps.
  *
- * Stores AI-generated, structured recommendations per gap. Regenerating
- * recommendations for a gap (within the same run) replaces prior ones —
- * enforced at the application layer (deleteRecommendationsForGap before
- * insert), not by a unique constraint, since multiple recommendations
- * per gap are valid (e.g. "add missing steps" + "add keywords").
+ * Stores AI-generated, structured recommendations per gap.
+ * The current implementation generates one recommendation per gap.
+ * Regenerating recommendations for a gap replaces the previous
+ * recommendation — enforced at the application layer
+ * (deleteRecommendationsForGap before insert), not by a unique constraint.
  */
-
 exports.up = (pgm) => {
   pgm.createTable("gap_recommendations", {
     id: "id",

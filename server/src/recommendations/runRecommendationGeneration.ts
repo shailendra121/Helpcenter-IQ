@@ -23,9 +23,9 @@ interface NonGoodGapRow {
 
 /**
  * Generates recommendations for every non-Good gap in an analysis run.
- * Depends on HCIQ-11 (gaps must be classified). Idempotent — clears a
- * gap's prior recommendations before generating new ones, per scope
- * item #3 ("regeneration replaces prior recommendations").
+ * Depends on HCIQ-11 (gaps must be classified). Idempotent — regeneration
+ * replaces prior recommendations, per scope item #3
+ * ("regeneration replaces prior recommendations").
  */
 export async function runRecommendationGeneration(
   zendeskAccountId: number,
@@ -34,9 +34,12 @@ export async function runRecommendationGeneration(
   const gapsResult = await pool.query<NonGoodGapRow>(
     `SELECT id, cluster_id, topic_summary, classification, justification, related_guide_article_id
      FROM knowledge_gaps
-     WHERE zendesk_account_id = $1 AND analysis_run_id = $2 AND classification != 'good_coverage'`,
+     WHERE zendesk_account_id = $1
+       AND analysis_run_id = $2
+       AND classification != 'good_coverage'`,
     [zendeskAccountId, analysisRunId]
   );
+
   const gaps = gapsResult.rows;
 
   let recommendationsCreated = 0;
@@ -54,7 +57,10 @@ export async function runRecommendationGeneration(
       } else {
         // Per-gap error isolation — one gap's malformed/failed
         // recommendation shouldn't abort the whole run.
-        console.error("Failed to generate a recommendation for a gap:", result.reason);
+        console.error(
+          "Failed to generate a recommendation for a gap:",
+          result.reason
+        );
       }
     }
   }
@@ -62,16 +68,26 @@ export async function runRecommendationGeneration(
   return { recommendationsCreated };
 }
 
-async function processGap(zendeskAccountId: number, gap: NonGoodGapRow): Promise<void> {
-  await deleteRecommendationsForGap(gap.id);
-
+async function processGap(
+  zendeskAccountId: number,
+  gap: NonGoodGapRow
+): Promise<void> {
   // Representative tickets come from the gap's source cluster.
-  const clusterResult = await pool.query<{ representative_ticket_ids: string[] | null }>(
-    `SELECT representative_ticket_ids FROM ticket_clusters WHERE id = $1`,
+  const clusterResult = await pool.query<{
+    representative_ticket_ids: string[] | null;
+  }>(
+    `SELECT representative_ticket_ids
+     FROM ticket_clusters
+     WHERE id = $1`,
     [gap.cluster_id]
   );
-  const representativeIds = (clusterResult.rows[0]?.representative_ticket_ids ?? []).map(Number);
+
+  const representativeIds = (
+    clusterResult.rows[0]?.representative_ticket_ids ?? []
+  ).map(Number);
+
   const representativeTickets = await getTicketsByIds(representativeIds);
+
   const excerpts = representativeTickets.map(
     (t) => `${t.subject ?? ""} — ${t.description ?? ""}`.trim()
   );
@@ -80,10 +96,16 @@ async function processGap(zendeskAccountId: number, gap: NonGoodGapRow): Promise
   let matchedArticleText: string | null = null;
 
   if (gap.related_guide_article_id) {
-    const articleResult = await pool.query<{ title: string | null; clean_text: string | null }>(
-      `SELECT title, clean_text FROM guide_articles WHERE id = $1`,
+    const articleResult = await pool.query<{
+      title: string | null;
+      clean_text: string | null;
+    }>(
+      `SELECT title, clean_text
+       FROM guide_articles
+       WHERE id = $1`,
       [gap.related_guide_article_id]
     );
+
     matchedArticleTitle = articleResult.rows[0]?.title ?? null;
     matchedArticleText = articleResult.rows[0]?.clean_text ?? null;
   }
@@ -97,14 +119,37 @@ async function processGap(zendeskAccountId: number, gap: NonGoodGapRow): Promise
     matchedArticleText,
   };
 
+  // Generate first. If the AI call fails, the existing recommendation
+  // remains untouched.
   const recommendation = await generateRecommendation(promptInput);
 
-  await createRecommendation({
-    zendeskAccountId,
-    gapId: gap.id,
-    type: recommendation.type,
-    rationale: recommendation.rationale,
-    suggestedKeywords: recommendation.suggestedKeywords,
-    suggestedTitle: recommendation.suggestedTitle,
-  });
+  // Only DELETE + INSERT are inside the transaction.
+  // This guarantees that if INSERT fails after DELETE, the DELETE
+  // is rolled back and the previous recommendation is preserved.
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    await deleteRecommendationsForGap(gap.id, client);
+
+    await createRecommendation(
+      {
+        zendeskAccountId,
+        gapId: gap.id,
+        type: recommendation.type,
+        rationale: recommendation.rationale,
+        suggestedKeywords: recommendation.suggestedKeywords,
+        suggestedTitle: recommendation.suggestedTitle,
+      },
+      client
+    );
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
