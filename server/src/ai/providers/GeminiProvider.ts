@@ -8,6 +8,7 @@ import type {
   GenerateTextRequest,
   GenerateTextResult,
 } from "./AIProvider.js";
+import { buildDraftArticlePrompt } from "../prompts/draftArticlePrompt.js";
 const GENERATION_MODEL = process.env.GEMINI_GENERATION_MODEL ?? "gemini-3.5-flash-lite";
 const EMBEDDING_MODEL = process.env.GEMINI_EMBEDDING_MODEL ?? "gemini-embedding-001";
 const EMBEDDING_DIMENSION = 1536; // must match pgvector column dimension in init-schema migration
@@ -68,10 +69,85 @@ export class GeminiProvider implements AIProvider {
 
     return { text, model: GENERATION_MODEL };
   }
+async draftArticle(request: DraftArticleRequest): Promise<DraftArticleResult> {
+    const prompt = buildDraftArticlePrompt({
+      topicLabel: request.topicLabel,
+      gapType: request.gapType,
+      representativeTicketExcerpts: request.ticketExcerpts,
+      existingArticleText: request.existingArticleText,
+      recommendationRationale: request.recommendationRationale,
+    });
 
-  async draftArticle(_request: DraftArticleRequest): Promise<DraftArticleResult> {
-    // TODO(HCIQ-13): wire up Gemini generation call using prompts in
-    // server/src/ai/prompts/.
-    throw new Error("Not implemented");
+    const MAX_ATTEMPTS = 2;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const response = await this.client.models.generateContent({
+        model: GENERATION_MODEL,
+        contents: prompt,
+      });
+
+      const text = response.text;
+      if (!text) {
+        lastError = new Error("Gemini generateContent returned no text");
+        continue;
+      }
+
+      const cleaned = text.replace(/```json\s*|```\s*/g, "").trim();
+
+      try {
+        const parsed = JSON.parse(cleaned);
+        return validateDraftArticle(parsed, GENERATION_MODEL);
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+      }
+    }
+
+    throw lastError ?? new Error("Unknown draft article generation failure");
   }
+}
+  function validateDraftArticle(parsed: unknown, model: string): DraftArticleResult {
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error("Draft article response is not a JSON object");
+  }
+  const obj = parsed as Record<string, unknown>;
+
+  if (typeof obj.suggestedTitle !== "string" || obj.suggestedTitle.trim().length === 0) {
+    throw new Error('"suggestedTitle" is missing or empty');
+  }
+  if (typeof obj.problemSummary !== "string") {
+    throw new Error('"problemSummary" is missing or not a string');
+  }
+  if (typeof obj.stepByStepResolution !== "string") {
+    throw new Error('"stepByStepResolution" is missing or not a string');
+  }
+  if (!Array.isArray(obj.faq)) {
+    throw new Error('"faq" is missing or not an array');
+  }
+  for (const item of obj.faq) {
+    if (
+      typeof item !== "object" ||
+      item === null ||
+      typeof (item as Record<string, unknown>).question !== "string" ||
+      typeof (item as Record<string, unknown>).answer !== "string"
+    ) {
+      throw new Error('"faq" contains an invalid entry (missing question/answer)');
+    }
+  }
+  if (!Array.isArray(obj.relatedKeywords) || !obj.relatedKeywords.every((k) => typeof k === "string")) {
+    throw new Error('"relatedKeywords" is missing or not a string array');
+  }
+  if (typeof obj.internalReviewerNotes !== "string") {
+    throw new Error('"internalReviewerNotes" is missing or not a string');
+  }
+
+  return {
+    suggestedTitle: obj.suggestedTitle,
+    problemSummary: obj.problemSummary,
+    stepByStepResolution: obj.stepByStepResolution,
+    faq: obj.faq as { question: string; answer: string }[],
+    relatedKeywords: obj.relatedKeywords as string[],
+    internalReviewerNotes: obj.internalReviewerNotes,
+    model,
+  };
 }

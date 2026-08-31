@@ -21,6 +21,8 @@ export interface DraftArticleRequest {
   ticketExcerpts: string[];
   existingArticleText?: string;
   gapType: "missing" | "weak" | "outdated";
+  topicLabel: string;
+  recommendationRationale: string;
 }
 
 export interface DraftArticleResult {
