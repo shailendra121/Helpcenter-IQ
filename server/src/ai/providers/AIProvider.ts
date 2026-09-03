@@ -16,23 +16,6 @@ export interface EmbeddingResult {
   model: string;
 }
 
-export interface DraftArticleRequest {
-  /** PII-masked cluster of ticket excerpts representing one knowledge gap. */
-  ticketExcerpts: string[];
-  existingArticleText?: string;
-  gapType: "missing" | "weak" | "outdated";
-}
-
-export interface DraftArticleResult {
-  suggestedTitle: string;
-  problemSummary: string;
-  stepByStepResolution: string;
-  faq: { question: string; answer: string }[];
-  relatedKeywords: string[];
-  internalReviewerNotes: string;
-  model: string;
-}
-
 export interface GenerateTextRequest {
   /** Already PII-masked prompt text. */
   prompt: string;
@@ -48,12 +31,13 @@ export interface AIProvider {
 
   embed(request: EmbeddingRequest): Promise<EmbeddingResult>;
 
-  draftArticle(request: DraftArticleRequest): Promise<DraftArticleResult>;
   /**
-   * Generic text generation — used for lightweight tasks like cluster
-   * labeling (HCIQ-10) that don't need draftArticle()'s full
-   * structured-article output. Callers must mask PII before calling,
-   * same rule as embed().
+   * Generic text generation used by AI features that need
+   * provider-agnostic model output.
+   *
+   * Callers are responsible for PII masking before calling the provider.
+   * Feature-specific parsing and validation must remain outside the
+   * concrete provider implementation.
    */
   generateText(request: GenerateTextRequest): Promise<GenerateTextResult>;
 }
