@@ -40,12 +40,7 @@ export async function runAnalysisPipeline(runId: number): Promise<void> {
       continue;
     }
     try{
-      const testDelayMs = Number(process.env.HCIQ_TEST_STAGE_DELAY_MS ?? 0);
-
-if (testDelayMs > 0) {
-  await new Promise((resolve) => setTimeout(resolve, testDelayMs));
-}
-    await startAnalysisStage(runId, stage);
+         await startAnalysisStage(runId, stage);
     
       switch (stage) {
         case "ticket_ingestion":
