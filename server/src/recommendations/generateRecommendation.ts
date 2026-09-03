@@ -50,12 +50,12 @@ const RECOMMENDATION_TYPES_BY_CLASSIFICATION = {
 function validateRecommendation(
   parsed: unknown,
   rawText: string,
-  classification: RecommendationPromptInput["classification"]
+  classification: RecommendationPromptInput["classification"],
 ): Recommendation {
   if (typeof parsed !== "object" || parsed === null) {
     throw new MalformedRecommendationError(
       rawText,
-      "response is not a JSON object"
+      "response is not a JSON object",
     );
   }
 
@@ -67,18 +67,17 @@ function validateRecommendation(
   ) {
     throw new MalformedRecommendationError(
       rawText,
-      `"type" is missing or not one of the allowed values: ${obj.type}`
+      `"type" is missing or not one of the allowed values: ${obj.type}`,
     );
   }
 
-  const allowedTypes = RECOMMENDATION_TYPES_BY_CLASSIFICATION[classification];
+  const allowedTypes =
+    RECOMMENDATION_TYPES_BY_CLASSIFICATION[classification];
 
-  if (
-    !(allowedTypes as readonly string[]).includes(obj.type)
-  ) {
+  if (!(allowedTypes as readonly string[]).includes(obj.type)) {
     throw new MalformedRecommendationError(
       rawText,
-      `"type" "${obj.type}" is not appropriate for "${classification}" classification`
+      `"type" "${obj.type}" is not appropriate for "${classification}" classification`,
     );
   }
 
@@ -88,23 +87,23 @@ function validateRecommendation(
   ) {
     throw new MalformedRecommendationError(
       rawText,
-      `"rationale" is missing or empty`
+      `"rationale" is missing or empty`,
     );
   }
 
   if (
-  !Array.isArray(obj.suggestedKeywords) ||
-  obj.suggestedKeywords.length === 0 ||
-  !obj.suggestedKeywords.every(
-    (keyword) =>
-      typeof keyword === "string" && keyword.trim().length > 0
-  )
-) {
-  throw new MalformedRecommendationError(
-    rawText,
-    `"suggestedKeywords" must contain at least one non-empty string`
-  );
-}
+    !Array.isArray(obj.suggestedKeywords) ||
+    obj.suggestedKeywords.length === 0 ||
+    !obj.suggestedKeywords.every(
+      (keyword) =>
+        typeof keyword === "string" && keyword.trim().length > 0,
+    )
+  ) {
+    throw new MalformedRecommendationError(
+      rawText,
+      `"suggestedKeywords" must contain at least one non-empty string`,
+    );
+  }
 
   if (
     obj.suggestedTitle !== null &&
@@ -112,7 +111,7 @@ function validateRecommendation(
   ) {
     throw new MalformedRecommendationError(
       rawText,
-      `"suggestedTitle" must be a string or null`
+      `"suggestedTitle" must be a string or null`,
     );
   }
 
@@ -136,7 +135,7 @@ const MAX_GENERATION_ATTEMPTS = 2;
  * are included in the AI prompt.
  */
 export async function generateRecommendation(
-  input: RecommendationPromptInput
+  input: RecommendationPromptInput,
 ): Promise<Recommendation> {
   const provider = createAIProvider();
 
@@ -146,7 +145,7 @@ export async function generateRecommendation(
     ...input,
     representativeTicketExcerpts:
       input.representativeTicketExcerpts.map(
-        (t) => maskPII(t).maskedText
+        (t) => maskPII(t).maskedText,
       ),
     matchedArticleText: input.matchedArticleText
       ? maskPII(input.matchedArticleText).maskedText
@@ -163,7 +162,7 @@ export async function generateRecommendation(
     attempt++
   ) {
     const { text } = await withRetry(() =>
-      provider.generateText({ prompt })
+      provider.generateText({ prompt }),
     );
 
     // Models sometimes wrap JSON in ```json fences despite instructions —
@@ -178,7 +177,7 @@ export async function generateRecommendation(
       return validateRecommendation(
         parsed,
         text,
-        input.classification
+        input.classification,
       );
     } catch (err) {
       // JSON.parse throws a plain SyntaxError, not our custom type —
@@ -189,12 +188,8 @@ export async function generateRecommendation(
           ? err
           : new MalformedRecommendationError(
               text,
-              err instanceof Error
-                ? err.message
-                : String(err)
+              err instanceof Error ? err.message : String(err),
             );
-
-      // Retry once on malformed or classification-incompatible output.
     }
   }
 
@@ -202,7 +197,7 @@ export async function generateRecommendation(
     lastError ??
     new MalformedRecommendationError(
       "",
-      "unknown parsing failure"
+      "unknown parsing failure",
     )
   );
 }
