@@ -51,6 +51,19 @@ export async function findZendeskAccountBySubdomain(
   );
   return result.rows[0] ?? null;
 }
+
+export async function findZendeskAccountById(
+  id: number
+): Promise<ZendeskAccountRow | null> {
+  const result = await pool.query<ZendeskAccountRow>(
+    `SELECT *
+     FROM zendesk_accounts
+     WHERE id = $1`,
+    [id]
+  );
+
+  return result.rows[0] ?? null;
+}
 export interface UpdateZendeskAccountTokensInput {
   accessTokenEncrypted: string;
   refreshTokenEncrypted: string | null;
