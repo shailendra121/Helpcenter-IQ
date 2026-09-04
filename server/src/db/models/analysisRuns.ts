@@ -39,6 +39,15 @@ export interface AnalysisRunRow {
   error_message: string | null;
   stage_timestamps: StageTimestamps;
 }
+export class ActiveRunExistsError extends Error {
+  constructor(public readonly zendeskAccountId: number) {
+    super(
+      `An analysis run is already active for Zendesk account ${zendeskAccountId}`,
+    );
+
+    this.name = "ActiveRunExistsError";
+  }
+}
 /**
  * Legacy HCIQ-8 helper.
  *
@@ -98,9 +107,7 @@ export async function createQueuedRun(
       "code" in error &&
       error.code === "23505"
     ) {
-      throw new Error(
-        `An analysis run is already active for Zendesk account ${zendeskAccountId}`
-      );
+      throw new ActiveRunExistsError(zendeskAccountId);
     }
 
     throw error;
@@ -125,6 +132,17 @@ export async function getActiveRunForAccount(
 
   return result.rows[0] ?? null;
 }
+
+/**
+ * Recovers runs left in the running state after a process restart.
+ *
+ * HCIQ-14 MVP uses a single in-process worker, so on startup all
+ * running runs are assumed to belong to the stopped worker and are
+ * safely re-queued for recovery.
+ *
+ * Multi-worker / multi-replica deployment is not supported by this
+ * recovery strategy.
+ */
 
 export async function recoverInterruptedRuns(): Promise<number> {
   const result = await pool.query(
@@ -158,29 +176,6 @@ export async function claimNextQueuedRun(): Promise<AnalysisRunRow | null> {
      FROM next_run
      WHERE ar.id = next_run.id
      RETURNING ar.*`,
-  );
-
-  return result.rows[0] ?? null;
-}
-
-/**
- * Atomically claims a queued run.
- *
- * Only one worker/process can successfully transition the run
- * from queued -> running.
- */
-export async function claimAnalysisRun(
-  runId: number
-): Promise<AnalysisRunRow | null> {
-  const result = await pool.query<AnalysisRunRow>(
-    `UPDATE analysis_runs
-     SET
-       status = 'running',
-       started_at = COALESCE(started_at, now())
-     WHERE id = $1
-       AND status = 'queued'
-     RETURNING *`,
-    [runId]
   );
 
   return result.rows[0] ?? null;
@@ -349,15 +344,4 @@ export async function getAnalysisRun(
   );
 
   return result.rows[0] ?? null;
-}
-
-/**
- * HCIQ-14 / HCIQ-15
- *
- * Dashboard-friendly run status lookup.
- */
-export async function getRunStatus(
-  runId: number
-): Promise<AnalysisRunRow | null> {
-  return getAnalysisRun(runId);
 }

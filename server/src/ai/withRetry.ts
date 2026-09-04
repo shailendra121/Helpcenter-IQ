@@ -9,10 +9,9 @@ const MAX_RETRIES = 5;
  *
  * Set GEMINI_MIN_INTERVAL_MS=0 to disable throttling locally.
  */
-const MIN_INTERVAL_MS = Number(
-  process.env.GEMINI_MIN_INTERVAL_MS ?? 1000,
-);
-
+function getMinIntervalMs(): number {
+  return Number(process.env.GEMINI_MIN_INTERVAL_MS ?? 1000);
+}
 let lastCallStartedAt = 0;
 let throttleQueue: Promise<void> = Promise.resolve();
 
@@ -37,8 +36,7 @@ async function waitForGlobalThrottle(): Promise<void> {
 
   try {
     const elapsed = Date.now() - lastCallStartedAt;
-    const remaining = MIN_INTERVAL_MS - elapsed;
-
+    const remaining = getMinIntervalMs() - elapsed;    
     if (remaining > 0) {
       await sleep(remaining);
     }

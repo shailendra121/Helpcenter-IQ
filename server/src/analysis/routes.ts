@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  ActiveRunExistsError,
   createQueuedRun,
   getAnalysisRun,
 } from "../db/models/analysisRuns.js";
@@ -55,15 +56,11 @@ router.post("/", async (req, res) => {
       current_stage: run.current_stage,
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : String(error);
-
-    if (message.includes("already active")) {
-      return res.status(409).json({
-        error: message,
-      });
-    }
-
+    if (error instanceof ActiveRunExistsError) {
+    return res.status(409).json({
+      error: error.message,
+    });
+  }
     console.error("[analysis-api] Failed to create run:", error);
 
     return res.status(500).json({
