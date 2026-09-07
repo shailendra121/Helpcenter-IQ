@@ -8,7 +8,6 @@ import {
   failAnalysisRun,
   getAnalysisRun,
 } from "../db/models/analysisRuns.js";
-
 const WINDOW_DAYS_OPTIONS = [30, 60, 90] as const;
 export type WindowDays = (typeof WINDOW_DAYS_OPTIONS)[number];
 
@@ -72,7 +71,7 @@ export async function ingestTickets(
     cursorOrStartTime = toUnixSeconds(windowStart);
   }
 
-  try {
+    try {
     const copilotFieldIds = await getCopilotFieldIds(subdomain);
     let endOfStream = false;
 
@@ -81,27 +80,50 @@ export async function ingestTickets(
 
       for (const rawTicket of page.tickets) {
         // API's start_time filters by update time; enforce the
-        // creation-time window here (see comment above / PR review).
-        
-        const createdAt = rawTicket.created_at ? new Date(rawTicket.created_at) : null;
+        // creation-time window here.
+        const createdAt = rawTicket.created_at
+          ? new Date(rawTicket.created_at)
+          : null;
+
         if (!createdAt || createdAt < windowStart) {
           continue;
         }
 
         const mapped = mapTicket(rawTicket, copilotFieldIds);
-        await upsertTicket({ zendeskAccountId, analysisRunId: runId, ...mapped });
+
+        await upsertTicket({
+          zendeskAccountId,
+          analysisRunId: runId,
+          ...mapped,
+        });
+
         ticketCount++;
       }
 
       cursorOrStartTime = page.after_cursor;
+
+      // Persist the cursor after every successfully processed page.
+      // This allows HCIQ-14 to resume from the last successful page.
       await updateAnalysisRunCursor(runId, page.after_cursor);
+
       endOfStream = page.end_of_stream;
     }
 
-    await completeAnalysisRun(runId);
+    // HCIQ-14 owns the overall analysis-run lifecycle.
+    // When resumeRunId is provided, this function is running as
+    // the ticket-ingestion stage and must NOT complete the whole run.
+    if (!resumeRunId) {
+      await completeAnalysisRun(runId);
+    }
+
     return { runId, ticketCount };
   } catch (err) {
-    await failAnalysisRun(runId);
+    // HCIQ-14 owns stage-level failure handling when this function
+    // is called with an existing run.
+    if (!resumeRunId) {
+      await failAnalysisRun(runId);
+    }
+
     throw err;
   }
 }
