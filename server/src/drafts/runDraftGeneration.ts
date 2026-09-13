@@ -24,15 +24,20 @@ interface NonGoodGapRow {
  */
 export async function runDraftGeneration(
   zendeskAccountId: number,
-  analysisRunId: number
+  analysisRunId: number,
 ): Promise<{ draftsCreated: number }> {
   const gapsResult = await pool.query<NonGoodGapRow>(
-    `SELECT id, cluster_id, topic_summary, classification, related_guide_article_id
+    `SELECT
+       id,
+       cluster_id,
+       topic_summary,
+       classification,
+       related_guide_article_id
      FROM knowledge_gaps
      WHERE zendesk_account_id = $1
        AND analysis_run_id = $2
        AND classification != 'good_coverage'`,
-    [zendeskAccountId, analysisRunId]
+    [zendeskAccountId, analysisRunId],
   );
 
   const gaps = gapsResult.rows;
@@ -43,7 +48,9 @@ export async function runDraftGeneration(
     const batch = gaps.slice(i, i + BATCH_SIZE);
 
     const results = await Promise.allSettled(
-      batch.map((gap) => processGapDraft(zendeskAccountId, gap))
+      batch.map((gap) =>
+        processGapDraft(zendeskAccountId, gap),
+      ),
     );
 
     for (const result of results) {
@@ -52,7 +59,7 @@ export async function runDraftGeneration(
       } else {
         console.error(
           "Failed to generate a draft for a gap:",
-          result.reason
+          result.reason,
         );
       }
     }
@@ -61,17 +68,63 @@ export async function runDraftGeneration(
   return { draftsCreated };
 }
 
+/**
+ * Generates exactly one draft for one non-Good knowledge gap.
+ *
+ * The gap lookup is account-scoped so a caller can never generate a
+ * draft for another Zendesk account.
+ */
+export async function generateDraftForGap(
+  zendeskAccountId: number,
+  gapId: number,
+): Promise<{ draftId: number }> {
+  const gapResult = await pool.query<NonGoodGapRow>(
+    `SELECT
+       id,
+       cluster_id,
+       topic_summary,
+       classification,
+       related_guide_article_id
+     FROM knowledge_gaps
+     WHERE id = $1
+       AND zendesk_account_id = $2
+       AND classification != 'good_coverage'
+     LIMIT 1`,
+    [gapId, zendeskAccountId],
+  );
+
+  const gap = gapResult.rows[0];
+
+  if (!gap) {
+    throw new Error("Knowledge gap not found");
+  }
+
+  if (gap.cluster_id === null) {
+    throw new Error(
+      `Knowledge gap ${gapId} has no associated cluster`,
+    );
+  }
+
+  const draftId = await processGapDraft(
+    zendeskAccountId,
+    gap,
+  );
+
+  return { draftId };
+}
+
 async function processGapDraft(
   zendeskAccountId: number,
-  gap: NonGoodGapRow
-): Promise<void> {
+  gap: NonGoodGapRow,
+): Promise<number> {
   const clusterResult = await pool.query<{
     representative_ticket_ids: string[] | null;
   }>(
     `SELECT representative_ticket_ids
      FROM ticket_clusters
-     WHERE id = $1`,
-    [gap.cluster_id]
+     WHERE id = $1
+       AND zendesk_account_id = $2`,
+    [gap.cluster_id, zendeskAccountId],
   );
 
   const representativeIds = (
@@ -79,11 +132,16 @@ async function processGapDraft(
   ).map(Number);
 
   const representativeTickets =
-    await getTicketsByIds(representativeIds);
+    await getTicketsByIds(
+      representativeIds,
+      zendeskAccountId,
+    );
 
   const excerpts = representativeTickets.map(
     (ticket) =>
-      `${ticket.subject ?? ""} — ${ticket.description ?? ""}`.trim()
+      `${ticket.subject ?? ""} — ${
+        ticket.description ?? ""
+      }`.trim(),
   );
 
   /**
@@ -103,8 +161,9 @@ async function processGapDraft(
     }>(
       `SELECT clean_text
        FROM guide_articles
-       WHERE id = $1`,
-      [gap.related_guide_article_id]
+       WHERE id = $1
+         AND zendesk_account_id = $2`,
+      [gap.related_guide_article_id, zendeskAccountId],
     );
 
     existingArticleText =
@@ -117,9 +176,10 @@ async function processGapDraft(
     `SELECT rationale
      FROM gap_recommendations
      WHERE gap_id = $1
+       AND zendesk_account_id = $2
      ORDER BY created_at DESC
      LIMIT 1`,
-    [gap.id]
+    [gap.id, zendeskAccountId],
   );
 
   const recommendationRationale =
@@ -134,7 +194,7 @@ async function processGapDraft(
     recommendationRationale,
   });
 
-  await createDraftArticle({
+  const draftId = await createDraftArticle({
     knowledgeGapId: gap.id,
     zendeskAccountId,
     suggestedTitle: draft.suggestedTitle,
@@ -145,5 +205,6 @@ async function processGapDraft(
     internalReviewerNotes: draft.internalReviewerNotes,
     aiModelUsed: draft.model,
   });
-}
 
+  return draftId;
+}

@@ -19,24 +19,22 @@ function toUnixSeconds(date: Date): number {
 }
 
 /**
- * Ingests all Guide articles for a Zendesk account, generating
- * embeddings only for articles that are new or whose zendesk_updated_at
- * changed since the last ingest (HCIQ-9's incremental-refresh
- * requirement).
+ * Ingests all Guide articles for a Zendesk account.
  *
- * Draft articles are stored as metadata only and do not receive
- * embeddings because they are not published knowledge coverage yet.
+ * Published articles are embedded when:
+ * - they are new,
+ * - their content changed, or
+ * - metadata says they are unchanged but no valid embedding exists.
  *
- * Per ADR-0003 (non-negotiable): article text is masked via maskPII()
- * before ever reaching embed() — same rule as HCIQ-5's ticket pipeline.
+ * Draft or empty articles do not contribute to knowledge coverage and
+ * therefore do not retain embeddings.
  *
- * AI calls use the centralized withRetry() wrapper so Gemini transient
- * rate-limit / 503 errors and global throttling are applied consistently.
+ * Article text is masked before being sent to the AI provider.
  */
 export async function ingestGuideArticles(
   zendeskAccountId: number,
   subdomain: string,
-  lookbackDays = 3650,
+  lookbackDays = 3650
 ): Promise<{
   articlesSeen: number;
   articlesEmbedded: number;
@@ -46,8 +44,8 @@ export async function ingestGuideArticles(
 
   let startTime = toUnixSeconds(
     new Date(
-      Date.now() - lookbackDays * 24 * 60 * 60 * 1000,
-    ),
+      Date.now() - lookbackDays * 24 * 60 * 60 * 1000
+    )
   );
 
   let articlesSeen = 0;
@@ -56,7 +54,10 @@ export async function ingestGuideArticles(
   let hasNextPage = true;
 
   while (hasNextPage) {
-    const page = await fetchArticlePage(subdomain, startTime);
+    const page = await fetchArticlePage(
+      subdomain,
+      startTime
+    );
 
     for (const article of page.articles) {
       articlesSeen++;
@@ -64,7 +65,7 @@ export async function ingestGuideArticles(
       const result = await processArticle(
         zendeskAccountId,
         article,
-        provider,
+        provider
       );
 
       if (result === "embedded") {
@@ -90,20 +91,18 @@ export async function ingestGuideArticles(
 async function processArticle(
   zendeskAccountId: number,
   article: FetchedArticle,
-  provider: ReturnType<typeof createAIProvider>,
+  provider: ReturnType<typeof createAIProvider>
 ): Promise<"embedded" | "skipped"> {
   const cleanText = cleanArticleBody(article.body);
   const updatedAt = new Date(article.updated_at);
 
-  // Check the OLD stored value BEFORE upserting — otherwise upsert
-  // overwrites zendesk_updated_at first, making every article look
-  // "unchanged" against its own freshly-written value.
+  // Read the previously stored timestamp before updating metadata.
   const storedUpdatedAt = await getStoredArticleUpdatedAt(
     zendeskAccountId,
-    article.id,
+    article.id
   );
 
-  await upsertArticleMetadata({
+  const { hasEmbedding } = await upsertArticleMetadata({
     zendeskAccountId,
     zendeskArticleId: article.id,
     title: article.title,
@@ -117,19 +116,25 @@ async function processArticle(
     zendeskUpdatedAt: updatedAt,
   });
 
+  // Draft articles are not published knowledge coverage.
+  // upsertArticleMetadata() also clears any stale embedding.
   if (article.draft) {
     return "skipped";
   }
 
-  // Guard against empty body — an article with no extractable text
-  // would otherwise send an empty string to embed(), which Gemini rejects.
+  // Empty published articles cannot be embedded.
+  // Any previous embedding has already been invalidated.
   if (!cleanText.trim()) {
     return "skipped";
   }
 
+  // Skip only when the article is unchanged AND a valid embedding
+  // still exists. If a prior embedding attempt failed, hasEmbedding
+  // will be false and this run retries it.
   if (
     storedUpdatedAt &&
-    storedUpdatedAt.getTime() === updatedAt.getTime()
+    storedUpdatedAt.getTime() === updatedAt.getTime() &&
+    hasEmbedding
   ) {
     return "skipped";
   }
@@ -137,13 +142,15 @@ async function processArticle(
   const { maskedText } = maskPII(cleanText);
 
   const { vector } = await withRetry(() =>
-    provider.embed({ text: maskedText }),
+    provider.embed({
+      text: maskedText,
+    })
   );
 
   await updateArticleEmbedding(
     zendeskAccountId,
     article.id,
-    vector,
+    vector
   );
 
   return "embedded";

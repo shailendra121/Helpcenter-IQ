@@ -3,7 +3,7 @@ import { pool } from "../pool.js";
 export interface GuideArticleRow {
   id: number;
   zendesk_account_id: number;
-  zendesk_article_id: string; // bigint comes back as string from pg
+  zendesk_article_id: string;
   title: string | null;
   clean_text: string | null;
   section_id: string | null;
@@ -11,7 +11,7 @@ export interface GuideArticleRow {
   draft: boolean;
   zendesk_created_at: Date | null;
   zendesk_updated_at: Date | null;
-  embedding: string | null; // pgvector returns as string
+  embedding: string | null;
   embedded_at: Date | null;
   ingested_at: Date;
 }
@@ -29,25 +29,52 @@ export interface UpsertGuideArticleMetaInput {
 }
 
 /**
- * Upserts article metadata WITHOUT touching the embedding column —
- * used when we're skipping re-embedding (article unchanged) but still
- * want metadata (title, draft status) current. Idempotent per
- * (zendesk_account_id, zendesk_article_id).
+ * Upserts article metadata and invalidates a stale embedding when the
+ * article's embedding source text changes or when the article should no
+ * longer contribute to published knowledge coverage.
+ *
+ * Returns whether a valid embedding is still present after the upsert.
  */
-export async function upsertArticleMetadata(input: UpsertGuideArticleMetaInput): Promise<void> {
-  await pool.query(
+export async function upsertArticleMetadata(
+  input: UpsertGuideArticleMetaInput
+): Promise<{ hasEmbedding: boolean }> {
+  const result = await pool.query<{ has_embedding: boolean }>(
     `INSERT INTO guide_articles
-       (zendesk_account_id, zendesk_article_id, title, clean_text, section_id,
-        locale, draft, zendesk_created_at, zendesk_updated_at)
+       (
+         zendesk_account_id,
+         zendesk_article_id,
+         title,
+         clean_text,
+         section_id,
+         locale,
+         draft,
+         zendesk_created_at,
+         zendesk_updated_at
+       )
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      ON CONFLICT (zendesk_account_id, zendesk_article_id) DO UPDATE SET
+       embedding = CASE
+         WHEN guide_articles.clean_text IS DISTINCT FROM EXCLUDED.clean_text
+           OR EXCLUDED.draft = true
+           OR BTRIM(EXCLUDED.clean_text) = ''
+         THEN NULL
+         ELSE guide_articles.embedding
+       END,
+       embedded_at = CASE
+         WHEN guide_articles.clean_text IS DISTINCT FROM EXCLUDED.clean_text
+           OR EXCLUDED.draft = true
+           OR BTRIM(EXCLUDED.clean_text) = ''
+         THEN NULL
+         ELSE guide_articles.embedded_at
+       END,
        title = EXCLUDED.title,
        clean_text = EXCLUDED.clean_text,
        section_id = EXCLUDED.section_id,
        locale = EXCLUDED.locale,
        draft = EXCLUDED.draft,
        zendesk_created_at = EXCLUDED.zendesk_created_at,
-       zendesk_updated_at = EXCLUDED.zendesk_updated_at`,
+       zendesk_updated_at = EXCLUDED.zendesk_updated_at
+     RETURNING embedding IS NOT NULL AS has_embedding`,
     [
       input.zendeskAccountId,
       input.zendeskArticleId,
@@ -60,12 +87,14 @@ export async function upsertArticleMetadata(input: UpsertGuideArticleMetaInput):
       input.zendeskUpdatedAt,
     ]
   );
+
+  return {
+    hasEmbedding: result.rows[0]?.has_embedding ?? false,
+  };
 }
 
 /**
- * Updates only the embedding + embedded_at for an already-upserted
- * article row. Kept separate from upsertArticleMetadata so the
- * incremental-refresh skip path never has to know about vectors.
+ * Updates the embedding and records when it was successfully generated.
  */
 export async function updateArticleEmbedding(
   zendeskAccountId: number,
@@ -74,54 +103,81 @@ export async function updateArticleEmbedding(
 ): Promise<void> {
   await pool.query(
     `UPDATE guide_articles
-     SET embedding = $1, embedded_at = now()
-     WHERE zendesk_account_id = $2 AND zendesk_article_id = $3`,
-    [`[${embedding.join(",")}]`, zendeskAccountId, zendeskArticleId]
+     SET embedding = $1,
+         embedded_at = NOW()
+     WHERE zendesk_account_id = $2
+       AND zendesk_article_id = $3`,
+    [
+      `[${embedding.join(",")}]`,
+      zendeskAccountId,
+      zendeskArticleId,
+    ]
   );
 }
 
 /**
- * Returns the stored zendesk_updated_at for an article, or null if we
- * haven't ingested it before. Used to decide whether re-embedding is
- * needed on refresh (HCIQ-9's incremental-refresh requirement).
+ * Returns the stored Zendesk updated timestamp for an article.
  */
 export async function getStoredArticleUpdatedAt(
   zendeskAccountId: number,
   zendeskArticleId: number
 ): Promise<Date | null> {
-  const result = await pool.query<{ zendesk_updated_at: Date | null }>(
-    `SELECT zendesk_updated_at FROM guide_articles
-     WHERE zendesk_account_id = $1 AND zendesk_article_id = $2`,
-    [zendeskAccountId, zendeskArticleId]
+  const result = await pool.query<{
+    zendesk_updated_at: Date | null;
+  }>(
+    `SELECT zendesk_updated_at
+     FROM guide_articles
+     WHERE zendesk_account_id = $1
+       AND zendesk_article_id = $2`,
+    [
+      zendeskAccountId,
+      zendeskArticleId,
+    ]
   );
+
   return result.rows[0]?.zendesk_updated_at ?? null;
 }
 
-export async function countArticlesForAccount(zendeskAccountId: number): Promise<number> {
+export async function countArticlesForAccount(
+  zendeskAccountId: number
+): Promise<number> {
   const result = await pool.query<{ count: string }>(
-    `SELECT COUNT(*) FROM guide_articles WHERE zendesk_account_id = $1`,
+    `SELECT COUNT(*)
+     FROM guide_articles
+     WHERE zendesk_account_id = $1`,
     [zendeskAccountId]
   );
+
   return parseInt(result.rows[0].count, 10);
 }
 
 /**
- * Finds the nearest articles to a given embedding vector using pgvector
- * cosine distance — used for the demo's similarity query and later by
- * gap classification (HCIQ-11).
+ * Finds the nearest published articles using pgvector cosine distance.
  */
 export async function findNearestArticles(
   zendeskAccountId: number,
   queryEmbedding: number[],
   limit = 5
 ): Promise<Array<{ title: string | null; distance: number }>> {
-  const result = await pool.query<{ title: string | null; distance: number }>(
-    `SELECT title, embedding <=> $1 AS distance
+  const result = await pool.query<{
+    title: string | null;
+    distance: number;
+  }>(
+    `SELECT
+       title,
+       embedding <=> $1 AS distance
      FROM guide_articles
-     WHERE zendesk_account_id = $2 AND embedding IS NOT NULL AND draft = false
+     WHERE zendesk_account_id = $2
+       AND embedding IS NOT NULL
+       AND draft = false
      ORDER BY distance ASC
      LIMIT $3`,
-    [`[${queryEmbedding.join(",")}]`, zendeskAccountId, limit]
+    [
+      `[${queryEmbedding.join(",")}]`,
+      zendeskAccountId,
+      limit,
+    ]
   );
+
   return result.rows;
 }

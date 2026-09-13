@@ -11,7 +11,7 @@
   "location": {
     "support": {
       "nav_bar": {
-        "url": "https://app.helpcenteriq.example/zaf/dashboard",
+      "url": "https://app.helpcenteriq.example/zaf/dashboard",
         "flexible": true
       }
     }

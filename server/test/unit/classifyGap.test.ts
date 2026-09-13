@@ -6,8 +6,7 @@ vi.mock("../../src/db/pool.js", () => ({
 }));
 
 const mockEmbed = vi.fn();
-const mockGenerateText = vi.fn();
-vi.mock("../../src/ai/providers/index.js", () => ({
+const mockGenerateText = vi.fn();vi.mock("../../src/ai/providers/index.js", () => ({
   createAIProvider: () => ({ embed: mockEmbed, generateText: mockGenerateText }),
 }));
 

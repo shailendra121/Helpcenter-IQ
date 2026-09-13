@@ -1,14 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockFetchArticlePage = vi.fn();
+
 vi.mock("../../src/zendesk/guideArticleFetcher.js", () => ({
   fetchArticlePage: mockFetchArticlePage,
-  cleanArticleBody: (html: string | null) => (html ? html.replace(/<[^>]+>/g, "").trim() : ""),
+  cleanArticleBody: (html: string | null) =>
+    html ? html.replace(/<[^>]+>/g, "").trim() : "",
 }));
 
 const mockUpsertArticleMetadata = vi.fn();
 const mockUpdateArticleEmbedding = vi.fn();
 const mockGetStoredArticleUpdatedAt = vi.fn();
+
 vi.mock("../../src/db/models/guideArticles.js", () => ({
   upsertArticleMetadata: mockUpsertArticleMetadata,
   updateArticleEmbedding: mockUpdateArticleEmbedding,
@@ -16,17 +19,32 @@ vi.mock("../../src/db/models/guideArticles.js", () => ({
 }));
 
 const mockEmbed = vi.fn();
+
 vi.mock("../../src/ai/providers/index.js", () => ({
-  createAIProvider: () => ({ embed: mockEmbed }),
+  createAIProvider: () => ({
+    embed: mockEmbed,
+  }),
 }));
 
-const { ingestGuideArticles } = await import("../../src/zendesk/ingestGuideArticles.js");
+const { ingestGuideArticles } = await import(
+  "../../src/zendesk/ingestGuideArticles.js"
+);
 
 describe("ingestGuideArticles", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+
     mockGetStoredArticleUpdatedAt.mockResolvedValue(null);
-    mockEmbed.mockResolvedValue({ vector: Array(1536).fill(0.1), model: "gemini-embedding-001" });
+
+    // New/changed articles have no valid embedding after metadata upsert.
+    mockUpsertArticleMetadata.mockResolvedValue({
+      hasEmbedding: false,
+    });
+
+    mockEmbed.mockResolvedValue({
+      vector: Array(1536).fill(0.1),
+      model: "gemini-embedding-001",
+    });
   });
 
   it("ingests a published article: stores metadata and generates an embedding", async () => {
@@ -47,18 +65,31 @@ describe("ingestGuideArticles", () => {
       end_time: 1700000000,
     });
 
-    const result = await ingestGuideArticles(1, "d3v-astonous");
+    const result = await ingestGuideArticles(
+      1,
+      "d3v-astonous"
+    );
 
     expect(result.articlesSeen).toBe(1);
     expect(result.articlesEmbedded).toBe(1);
-    expect(mockUpsertArticleMetadata).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "How to reset your password", cleanText: "Click here to reset." })
+
+    expect(
+      mockUpsertArticleMetadata
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "How to reset your password",
+        cleanText: "Click here to reset.",
+      })
     );
+
     expect(mockEmbed).toHaveBeenCalledOnce();
-    expect(mockUpdateArticleEmbedding).toHaveBeenCalledOnce();
-    // Assert the actual dimension, not just that embed() was called —
-    // per reviewer: the mock returns 1536 but nothing was checking it.
-    const [, , embeddingArg] = mockUpdateArticleEmbedding.mock.calls[0];
+    expect(
+      mockUpdateArticleEmbedding
+    ).toHaveBeenCalledOnce();
+
+    const [, , embeddingArg] =
+      mockUpdateArticleEmbedding.mock.calls[0];
+
     expect(embeddingArg).toHaveLength(1536);
   });
 
@@ -80,17 +111,36 @@ describe("ingestGuideArticles", () => {
       end_time: 1700000000,
     });
 
-    const result = await ingestGuideArticles(1, "d3v-astonous");
+    const result = await ingestGuideArticles(
+      1,
+      "d3v-astonous"
+    );
 
     expect(result.articlesEmbedded).toBe(0);
     expect(result.articlesSkipped).toBe(1);
-    expect(mockUpsertArticleMetadata).toHaveBeenCalledOnce(); // metadata stored
-    expect(mockEmbed).not.toHaveBeenCalled(); // but no embedding for drafts
+
+    expect(
+      mockUpsertArticleMetadata
+    ).toHaveBeenCalledOnce();
+
+    expect(mockEmbed).not.toHaveBeenCalled();
+    expect(
+      mockUpdateArticleEmbedding
+    ).not.toHaveBeenCalled();
   });
 
-  it("skips re-embedding an article whose updated_at is unchanged (incremental refresh)", async () => {
-    const sameTimestamp = "2026-01-01T00:00:00Z";
-    mockGetStoredArticleUpdatedAt.mockResolvedValue(new Date(sameTimestamp));
+  it("skips re-embedding an unchanged article when a valid embedding exists", async () => {
+    const sameTimestamp =
+      "2026-01-01T00:00:00Z";
+
+    mockGetStoredArticleUpdatedAt.mockResolvedValue(
+      new Date(sameTimestamp)
+    );
+
+    // Important: unchanged article already has a valid embedding.
+    mockUpsertArticleMetadata.mockResolvedValue({
+      hasEmbedding: true,
+    });
 
     mockFetchArticlePage.mockResolvedValueOnce({
       articles: [
@@ -109,15 +159,73 @@ describe("ingestGuideArticles", () => {
       end_time: 1700000000,
     });
 
-    const result = await ingestGuideArticles(1, "d3v-astonous");
+    const result = await ingestGuideArticles(
+      1,
+      "d3v-astonous"
+    );
 
     expect(result.articlesSkipped).toBe(1);
     expect(result.articlesEmbedded).toBe(0);
-    expect(mockEmbed).not.toHaveBeenCalled(); // proves refresh skip works
+
+    expect(mockEmbed).not.toHaveBeenCalled();
+    expect(
+      mockUpdateArticleEmbedding
+    ).not.toHaveBeenCalled();
+  });
+
+  it("retries embedding when updated_at is unchanged but the embedding is missing", async () => {
+    const sameTimestamp =
+      "2026-01-01T00:00:00Z";
+
+    mockGetStoredArticleUpdatedAt.mockResolvedValue(
+      new Date(sameTimestamp)
+    );
+
+    // Simulates an earlier embedding failure:
+    // metadata timestamp was saved, but no embedding exists.
+    mockUpsertArticleMetadata.mockResolvedValue({
+      hasEmbedding: false,
+    });
+
+    mockFetchArticlePage.mockResolvedValueOnce({
+      articles: [
+        {
+          id: 9,
+          title: "Retry article",
+          body: "<p>This article still needs an embedding.</p>",
+          locale: "en-us",
+          draft: false,
+          section_id: 100,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: sameTimestamp,
+        },
+      ],
+      next_page: null,
+      end_time: 1700000000,
+    });
+
+    const result = await ingestGuideArticles(
+      1,
+      "d3v-astonous"
+    );
+
+    expect(result.articlesSkipped).toBe(0);
+    expect(result.articlesEmbedded).toBe(1);
+
+    expect(mockEmbed).toHaveBeenCalledOnce();
+    expect(
+      mockUpdateArticleEmbedding
+    ).toHaveBeenCalledOnce();
   });
 
   it("re-embeds an article whose updated_at DID change", async () => {
-    mockGetStoredArticleUpdatedAt.mockResolvedValue(new Date("2025-01-01T00:00:00Z")); // old
+    mockGetStoredArticleUpdatedAt.mockResolvedValue(
+      new Date("2025-01-01T00:00:00Z")
+    );
+
+    mockUpsertArticleMetadata.mockResolvedValue({
+      hasEmbedding: false,
+    });
 
     mockFetchArticlePage.mockResolvedValueOnce({
       articles: [
@@ -129,26 +237,34 @@ describe("ingestGuideArticles", () => {
           draft: false,
           section_id: 100,
           created_at: "2026-01-01T00:00:00Z",
-          updated_at: "2026-06-01T00:00:00Z", // newer
+          updated_at: "2026-06-01T00:00:00Z",
         },
       ],
       next_page: null,
       end_time: 1700000000,
     });
 
-    const result = await ingestGuideArticles(1, "d3v-astonous");
+    const result = await ingestGuideArticles(
+      1,
+      "d3v-astonous"
+    );
 
     expect(result.articlesEmbedded).toBe(1);
     expect(mockEmbed).toHaveBeenCalledOnce();
+
+    expect(
+      mockUpdateArticleEmbedding
+    ).toHaveBeenCalledOnce();
   });
 
-  it("passes masked text (not raw HTML/PII) to embed()", async () => {
+  it("passes masked text instead of raw PII to embed()", async () => {
     mockFetchArticlePage.mockResolvedValueOnce({
       articles: [
         {
           id: 5,
           title: "Contact support",
-          body: "<p>Email us at jane.doe@example.com for help.</p>",
+          body:
+            "<p>Email us at jane.doe@example.com for help.</p>",
           locale: "en-us",
           draft: false,
           section_id: 100,
@@ -160,30 +276,68 @@ describe("ingestGuideArticles", () => {
       end_time: 1700000000,
     });
 
-    await ingestGuideArticles(1, "d3v-astonous");
+    await ingestGuideArticles(
+      1,
+      "d3v-astonous"
+    );
 
-    const embedCallArg = mockEmbed.mock.calls[0][0];
-    expect(embedCallArg.text).not.toContain("jane.doe@example.com");
-    expect(embedCallArg.text).toContain("[REDACTED]");
+    const embedCallArg =
+      mockEmbed.mock.calls[0][0];
+
+    expect(embedCallArg.text).not.toContain(
+      "jane.doe@example.com"
+    );
+
+    expect(embedCallArg.text).toContain(
+      "[REDACTED]"
+    );
   });
 
   it("paginates across multiple pages", async () => {
     mockFetchArticlePage
       .mockResolvedValueOnce({
-        articles: [{ id: 6, title: "Page 1 article", body: "<p>Content</p>", locale: "en-us", draft: false, section_id: 1, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }],
+        articles: [
+          {
+            id: 6,
+            title: "Page 1 article",
+            body: "<p>Content</p>",
+            locale: "en-us",
+            draft: false,
+            section_id: 1,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        ],
         next_page: "page2-url",
         end_time: 1700000100,
       })
       .mockResolvedValueOnce({
-        articles: [{ id: 7, title: "Page 2 article", body: "<p>Content</p>", locale: "en-us", draft: false, section_id: 1, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }],
+        articles: [
+          {
+            id: 7,
+            title: "Page 2 article",
+            body: "<p>Content</p>",
+            locale: "en-us",
+            draft: false,
+            section_id: 1,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        ],
         next_page: null,
         end_time: 1700000200,
       });
 
-    const result = await ingestGuideArticles(1, "d3v-astonous");
+    const result = await ingestGuideArticles(
+      1,
+      "d3v-astonous"
+    );
 
     expect(result.articlesSeen).toBe(2);
-    expect(mockFetchArticlePage).toHaveBeenCalledTimes(2);
+
+    expect(
+      mockFetchArticlePage
+    ).toHaveBeenCalledTimes(2);
   });
 
   it("skips embedding when article body produces empty clean text", async () => {
@@ -192,7 +346,7 @@ describe("ingestGuideArticles", () => {
         {
           id: 8,
           title: "Empty article",
-          body: "", // or null — nothing to embed
+          body: "",
           locale: "en-us",
           draft: false,
           section_id: 100,
@@ -204,9 +358,25 @@ describe("ingestGuideArticles", () => {
       end_time: 1700000000,
     });
 
-    const result = await ingestGuideArticles(1, "d3v-astonous");
+    const result = await ingestGuideArticles(
+      1,
+      "d3v-astonous"
+    );
 
     expect(result.articlesSkipped).toBe(1);
+    expect(result.articlesEmbedded).toBe(0);
+
+    expect(
+      mockUpsertArticleMetadata
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cleanText: "",
+      })
+    );
+
     expect(mockEmbed).not.toHaveBeenCalled();
+    expect(
+      mockUpdateArticleEmbedding
+    ).not.toHaveBeenCalled();
   });
 });
