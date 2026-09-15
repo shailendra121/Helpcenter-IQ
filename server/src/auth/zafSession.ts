@@ -109,16 +109,19 @@ export function setZafSessionCookie(
     subdomain,
   );
 
-  const production =
-    process.env.NODE_ENV === "production";
-
-  const sameSite = production ? "None" : "Lax";
-
+  /*
+   * HelpCenterIQ runs inside a Zendesk iframe.
+   *
+   * The dashboard is therefore cross-site relative to the Zendesk
+   * parent page. SameSite=None is required so the browser can send
+   * this session cookie with dashboard API requests made from the
+   * embedded application.
+   *
+   * Modern browsers require Secure whenever SameSite=None is used.
+   */
   res.setHeader(
     "Set-Cookie",
-    `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=${sameSite}; Max-Age=${SESSION_TTL_SECONDS}${
-      production ? "; Secure" : ""
-    }`,
+    `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=${SESSION_TTL_SECONDS}`,
   );
 }
 

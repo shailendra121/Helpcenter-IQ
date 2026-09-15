@@ -138,12 +138,27 @@ describe("runRecommendationGeneration — recommendation replacement", () => {
       "Recommendation generation failed for 1 gap(s)"
     );
 
+    // Tenancy regression protection:
+    // representative ticket lookup must stay scoped
+    // to the Zendesk account.
+    expect(mockGetTicketsByIds).toHaveBeenCalledTimes(1);
+
+    expect(mockGetTicketsByIds).toHaveBeenCalledWith(
+      [100, 101],
+      1
+    );
+
     expect(mockGenerateRecommendation).toHaveBeenCalledTimes(1);
 
     // Generate-first behavior: the old recommendation remains untouched
     // if the AI call fails.
-    expect(mockDeleteRecommendationsForGap).not.toHaveBeenCalled();
-    expect(mockCreateRecommendation).not.toHaveBeenCalled();
+    expect(
+      mockDeleteRecommendationsForGap
+    ).not.toHaveBeenCalled();
+
+    expect(
+      mockCreateRecommendation
+    ).not.toHaveBeenCalled();
 
     // No transaction starts because generation failed before DB replacement.
     expect(mockPoolConnect).not.toHaveBeenCalled();
@@ -155,6 +170,13 @@ describe("runRecommendationGeneration — recommendation replacement", () => {
     const result = await runRecommendationGeneration(1, 2);
 
     expect(result.recommendationsCreated).toBe(1);
+
+    expect(mockGetTicketsByIds).toHaveBeenCalledTimes(1);
+
+    expect(mockGetTicketsByIds).toHaveBeenCalledWith(
+      [100, 101],
+      1
+    );
 
     expect(mockGenerateRecommendation).toHaveBeenCalledTimes(1);
     expect(mockPoolConnect).toHaveBeenCalledTimes(1);
@@ -194,6 +216,13 @@ describe("runRecommendationGeneration — recommendation replacement", () => {
       runRecommendationGeneration(1, 2)
     ).rejects.toThrow(
       "Recommendation generation failed for 1 gap(s)"
+    );
+
+    expect(mockGetTicketsByIds).toHaveBeenCalledTimes(1);
+
+    expect(mockGetTicketsByIds).toHaveBeenCalledWith(
+      [100, 101],
+      1
     );
 
     expect(mockDeleteRecommendationsForGap).toHaveBeenCalledWith(

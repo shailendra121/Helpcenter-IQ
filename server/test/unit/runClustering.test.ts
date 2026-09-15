@@ -90,7 +90,6 @@ describe("runClustering", () => {
 
     mockCreateTicketCluster.mockResolvedValue(undefined);
 
-    // Used by logClusteringIssue().
     mockPoolQuery.mockResolvedValue({
       rows: [],
     });
@@ -103,7 +102,7 @@ describe("runClustering", () => {
 
     expect(mockDeleteClustersForRun).toHaveBeenCalledWith(
       1,
-      100
+      100,
     );
 
     expect(mockClusterTicketsForRunSQL).toHaveBeenCalledWith(
@@ -112,7 +111,16 @@ describe("runClustering", () => {
       {
         similarityThreshold: 0.7,
         minClusterSize: 2,
-      }
+      },
+    );
+
+    // Tenancy regression protection:
+    // representative ticket lookup must stay scoped to the Zendesk account.
+    expect(mockGetTicketsByIds).toHaveBeenCalledTimes(1);
+
+    expect(mockGetTicketsByIds).toHaveBeenCalledWith(
+      [101, 102],
+      1,
     );
 
     expect(mockGenerateClusterLabel).toHaveBeenCalledTimes(1);
@@ -141,10 +149,16 @@ describe("runClustering", () => {
 
   it("uses the fallback label and still persists the cluster when label generation fails", async () => {
     mockGenerateClusterLabel.mockRejectedValue(
-      new Error("AI label generation failed")
+      new Error("AI label generation failed"),
     );
 
     const result = await runClustering(1, 100);
+
+    // Tenant scope must also remain present on the degraded path.
+    expect(mockGetTicketsByIds).toHaveBeenCalledWith(
+      [101, 102],
+      1,
+    );
 
     expect(mockCreateTicketCluster).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -152,39 +166,44 @@ describe("runClustering", () => {
         analysisRunId: 100,
         topicLabel: "Unlabeled cluster",
         topicSummary: "",
-      })
+      }),
     );
 
     expect(result.clustersCreated).toBe(1);
 
-    // Label failure is degraded behavior, so it should be audit logged.
     expect(mockPoolQuery).toHaveBeenCalledWith(
       expect.stringContaining("INSERT INTO audit_logs"),
       expect.arrayContaining([
         1,
         "clustering_cluster_processing_failed",
-      ])
+      ]),
     );
   });
 
   it("throws when cluster persistence fails instead of silently completing the stage", async () => {
     mockCreateTicketCluster.mockRejectedValue(
-      new Error("Database persistence failed")
+      new Error("Database persistence failed"),
     );
 
     await expect(
-      runClustering(1, 100)
+      runClustering(1, 100),
     ).rejects.toThrow(
-      "Clustering persistence failed for 1 cluster(s)"
+      "Clustering persistence failed for 1 cluster(s)",
     );
 
-    // Persistence failure should still be audit logged.
+    // The representative ticket lookup still needs the account scope
+    // before persistence is attempted.
+    expect(mockGetTicketsByIds).toHaveBeenCalledWith(
+      [101, 102],
+      1,
+    );
+
     expect(mockPoolQuery).toHaveBeenCalledWith(
       expect.stringContaining("INSERT INTO audit_logs"),
       expect.arrayContaining([
         1,
         "clustering_cluster_processing_failed",
-      ])
+      ]),
     );
   });
 });

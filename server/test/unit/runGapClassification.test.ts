@@ -94,6 +94,23 @@ describe("runGapClassification", () => {
       100
     );
 
+    // Tenancy regression protection:
+    // every representative-ticket lookup must be scoped to
+    // the same Zendesk account as the analysis run.
+    expect(mockGetTicketsByIds).toHaveBeenCalledTimes(2);
+
+    expect(mockGetTicketsByIds).toHaveBeenNthCalledWith(
+      1,
+      [10],
+      1
+    );
+
+    expect(mockGetTicketsByIds).toHaveBeenNthCalledWith(
+      2,
+      [20],
+      1
+    );
+
     expect(mockClassifyGap).toHaveBeenCalledTimes(2);
     expect(mockCreateKnowledgeGap).toHaveBeenCalledTimes(2);
   });
@@ -120,6 +137,20 @@ describe("runGapClassification", () => {
       runGapClassification(1, 100)
     ).rejects.toThrow(
       "Gap classification failed for 1 cluster(s)"
+    );
+
+    expect(mockGetTicketsByIds).toHaveBeenCalledTimes(2);
+
+    expect(mockGetTicketsByIds).toHaveBeenNthCalledWith(
+      1,
+      [10],
+      1
+    );
+
+    expect(mockGetTicketsByIds).toHaveBeenNthCalledWith(
+      2,
+      [20],
+      1
     );
 
     // Promise.allSettled() still lets the successful cluster finish.

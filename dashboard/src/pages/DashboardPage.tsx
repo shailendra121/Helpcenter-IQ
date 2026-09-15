@@ -19,6 +19,13 @@ type SortOption =
   | "volume"
   | "topic";
 
+interface DashboardSession {
+  authenticated: boolean;
+  zendesk_account_id: number;
+  subdomain: string;
+  zendesk_url: string;
+}
+
 interface AnalysisRun {
   id: number;
   window_days: number;
@@ -127,6 +134,9 @@ function formatRecommendationType(
 }
 
 export default function DashboardPage() {
+  const [dashboardSession, setDashboardSession] =
+    useState<DashboardSession | null>(null);
+
   const [windowDays, setWindowDays] =
     useState<WindowDays>(30);
 
@@ -161,6 +171,31 @@ export default function DashboardPage() {
 
   const [error, setError] =
     useState("");
+
+  /*
+   * Fetch the authenticated Zendesk tenant represented
+   * by the signed ZAF dashboard session.
+   */
+  const fetchDashboardSession =
+    useCallback(async () => {
+      const response = await fetch(
+        "/api/dashboard/session",
+        {
+          credentials: "include",
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          "Failed to verify connected Zendesk account.",
+        );
+      }
+
+      const data =
+        (await response.json()) as DashboardSession;
+
+      setDashboardSession(data);
+    }, []);
 
   /*
    * Fetch dashboard summary.
@@ -259,6 +294,7 @@ export default function DashboardPage() {
           setError("");
 
           await Promise.all([
+            fetchDashboardSession(),
             fetchSummary(),
             fetchGaps(),
           ]);
@@ -277,6 +313,7 @@ export default function DashboardPage() {
 
     void loadDashboard();
   }, [
+    fetchDashboardSession,
     fetchSummary,
     fetchGaps,
     fetchLatestRun,
@@ -520,24 +557,70 @@ export default function DashboardPage() {
       <header
         style={{
           marginBottom: "32px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: "24px",
+          flexWrap: "wrap",
         }}
       >
-        <h1
-          style={{
-            margin: 0,
-          }}
-        >
-          HelpCenterIQ
-        </h1>
+        <div>
+          <h1
+            style={{
+              margin: 0,
+            }}
+          >
+            HelpCenterIQ
+          </h1>
 
-        <p
-          style={{
-            color: "#6b7280",
-          }}
-        >
-          Knowledge gap intelligence
-          dashboard
-        </p>
+          <p
+            style={{
+              color: "#6b7280",
+              marginBottom: 0,
+            }}
+          >
+            Knowledge gap intelligence
+            dashboard
+          </p>
+        </div>
+
+        {dashboardSession && (
+          <div
+            aria-label="Connected Zendesk account"
+            style={{
+              background: "#fff",
+              border: "1px solid #e5e7eb",
+              borderRadius: "10px",
+              padding: "12px 16px",
+              minWidth: "230px",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "#047857",
+                marginBottom: "4px",
+              }}
+            >
+              ✓ Connected Zendesk
+            </div>
+
+            <a
+              href={dashboardSession.zendesk_url}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                color: "#1f2937",
+                fontWeight: 600,
+                textDecoration: "none",
+                fontSize: "14px",
+              }}
+            >
+              {dashboardSession.subdomain}.zendesk.com
+            </a>
+          </div>
+        )}
       </header>
 
       {error && (
