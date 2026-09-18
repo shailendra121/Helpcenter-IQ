@@ -26,7 +26,9 @@ vi.mock("../../src/ai/providers/index.js", () => ({
   }),
 }));
 
-const mockWithRetry = vi.fn((fn: () => Promise<unknown>) => fn());
+const mockWithRetry = vi.fn(
+  (fn: () => Promise<unknown>) => fn()
+);
 
 vi.mock("../../src/ai/withRetry.js", () => ({
   withRetry: mockWithRetry,
@@ -71,7 +73,11 @@ describe("runDraftGeneration — PII masking", () => {
 
     // Cluster representative ticket IDs
     mockPoolQuery.mockResolvedValueOnce({
-      rows: [{ representative_ticket_ids: ["1"] }],
+      rows: [
+        {
+          representative_ticket_ids: ["1"],
+        },
+      ],
     });
 
     mockGetTicketsByIds.mockResolvedValue([
@@ -95,23 +101,41 @@ describe("runDraftGeneration — PII masking", () => {
 
     // Recommendation rationale
     mockPoolQuery.mockResolvedValueOnce({
-      rows: [{ rationale: "Article is incomplete." }],
+      rows: [
+        {
+          rationale: "Article is incomplete.",
+        },
+      ],
     });
 
     await runDraftGeneration(1, 5);
 
+    // Tenancy regression protection:
+    // ticket IDs are normalized to numbers and the lookup
+    // must remain scoped to the Zendesk account.
+    expect(mockGetTicketsByIds).toHaveBeenCalledTimes(1);
+
+    expect(mockGetTicketsByIds).toHaveBeenCalledWith(
+      [1],
+      1
+    );
+
     expect(mockGenerateText).toHaveBeenCalledTimes(1);
 
-    const generateTextArg = mockGenerateText.mock.calls[0][0];
+    const generateTextArg =
+      mockGenerateText.mock.calls[0][0];
 
     expect(generateTextArg.prompt).not.toContain(
       "jane.doe@example.com"
     );
+
     expect(generateTextArg.prompt).not.toContain(
       "555-123-4567"
     );
 
-    expect(generateTextArg.prompt).toContain("[REDACTED]");
+    expect(generateTextArg.prompt).toContain(
+      "[REDACTED]"
+    );
   });
 
   it("calls AI generation only through the provider interface", async () => {
@@ -128,18 +152,33 @@ describe("runDraftGeneration — PII masking", () => {
     });
 
     mockPoolQuery.mockResolvedValueOnce({
-      rows: [{ representative_ticket_ids: [] }],
+      rows: [
+        {
+          representative_ticket_ids: [],
+        },
+      ],
     });
 
     mockGetTicketsByIds.mockResolvedValue([]);
 
     mockPoolQuery.mockResolvedValueOnce({
-      rows: [{ rationale: "No coverage exists." }],
+      rows: [
+        {
+          rationale: "No coverage exists.",
+        },
+      ],
     });
 
     await runDraftGeneration(1, 5);
 
+    // Empty lookups must also remain tenant scoped.
+    expect(mockGetTicketsByIds).toHaveBeenCalledTimes(1);
+
+    expect(mockGetTicketsByIds).toHaveBeenCalledWith(
+      [],
+      1
+    );
+
     expect(mockGenerateText).toHaveBeenCalledTimes(1);
   });
 });
-

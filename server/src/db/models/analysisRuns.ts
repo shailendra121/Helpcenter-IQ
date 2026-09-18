@@ -134,6 +134,28 @@ export async function getActiveRunForAccount(
 }
 
 /**
+ * Returns the most recently created analysis run for an account,
+ * regardless of status.
+ *
+ * Used by dashboard status restoration so completed/failed runs
+ * remain visible after a page reload.
+ */
+export async function getLatestRunForAccount(
+  zendeskAccountId: number
+): Promise<AnalysisRunRow | null> {
+  const result = await pool.query<AnalysisRunRow>(
+    `SELECT *
+     FROM analysis_runs
+     WHERE zendesk_account_id = $1
+     ORDER BY id DESC
+     LIMIT 1`,
+    [zendeskAccountId]
+  );
+
+  return result.rows[0] ?? null;
+}
+
+/**
  * Recovers runs left in the running state after a process restart.
  *
  * HCIQ-14 MVP uses a single in-process worker, so on startup all

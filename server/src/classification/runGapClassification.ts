@@ -1,52 +1,99 @@
 import { getClustersForRun } from "../db/models/ticketClusters.js";
 import { getTicketsByIds } from "../db/models/tickets.js";
-import { createKnowledgeGap, deleteGapsForRun } from "../db/models/knowledgeGaps.js";
+import {
+  createKnowledgeGap,
+  deleteGapsForRun,
+} from "../db/models/knowledgeGaps.js";
 import { classifyGap } from "./classifyGap.js";
 import { pool } from "../db/pool.js";
 
-// Limits concurrent cluster processing so large accounts (100+ clusters)
-// don't fire hundreds of sequential LLM calls one at a time, while still
-// respecting AI provider rate limits by not going fully unbounded.
+// Limits concurrent cluster processing so large accounts don't fire
+// an unbounded number of AI calls at once.
 const BATCH_SIZE = 5;
 
 /**
- * Runs gap classification for every topic cluster in an analysis run —
- * the orchestrator tying HCIQ-11's pieces together. Depends on HCIQ-10
- * (clusters must exist) and HCIQ-9 (article embeddings must exist).
+ * Runs gap classification for every topic cluster in an analysis run.
  *
- * Processes clusters in bounded-concurrency batches rather than fully
- * sequentially — at MVP-scale cluster counts (single digits to low
- * tens) this doesn't matter much, but avoids a linear wall-clock-time
- * cliff as accounts grow (flagged during review, same scaling concern
- * raised on HCIQ-10's clustering loop).
+ * Clusters are processed with bounded concurrency. Individual failures
+ * are allowed to settle so the rest of the current batch can finish,
+ * but any failure makes the overall classification stage fail.
+ *
+ * This is important for HCIQ-14: the orchestrator must not mark the
+ * classification stage completed when one or more clusters were not
+ * successfully classified.
+ *
+ * A retry starts by clearing gaps for the run and regenerating them,
+ * so partially-created gaps from a failed attempt do not survive the
+ * next classification attempt.
  */
 export async function runGapClassification(
   zendeskAccountId: number,
   analysisRunId: number
 ): Promise<{ gapsCreated: number }> {
-  await deleteGapsForRun(zendeskAccountId, analysisRunId);
+  await deleteGapsForRun(
+    zendeskAccountId,
+    analysisRunId
+  );
 
-  const clusters = await getClustersForRun(zendeskAccountId, analysisRunId);
+  const clusters = await getClustersForRun(
+    zendeskAccountId,
+    analysisRunId
+  );
 
   let gapsCreated = 0;
+  const failures: unknown[] = [];
 
-  for (let i = 0; i < clusters.length; i += BATCH_SIZE) {
-    const batch = clusters.slice(i, i + BATCH_SIZE);
+  for (
+    let i = 0;
+    i < clusters.length;
+    i += BATCH_SIZE
+  ) {
+    const batch = clusters.slice(
+      i,
+      i + BATCH_SIZE
+    );
 
     const results = await Promise.allSettled(
-      batch.map((cluster) => processCluster(zendeskAccountId, analysisRunId, cluster))
+      batch.map((cluster) =>
+        processCluster(
+          zendeskAccountId,
+          analysisRunId,
+          cluster
+        )
+      )
     );
 
     for (const result of results) {
       if (result.status === "fulfilled") {
         gapsCreated++;
       } else {
-        // Per-cluster error isolation: one cluster's classification
-        // failure shouldn't abort the whole run — log and continue,
-        // same pattern as HCIQ-10's runClustering.ts.
-        console.error("Failed to classify a cluster:", result.reason);
+        failures.push(result.reason);
+
+        console.error(
+          "Failed to classify a cluster:",
+          result.reason
+        );
       }
     }
+  }
+
+  // HCIQ-14 requires the stage to fail if any cluster could not
+  // be classified. Successful work in the batch is allowed to finish,
+  // but the orchestrator must receive an error rather than treating
+  // this as a completed stage.
+  if (failures.length > 0) {
+    const firstFailure = failures[0];
+
+    const firstMessage =
+      firstFailure instanceof Error
+        ? firstFailure.message
+        : String(firstFailure);
+
+    throw new Error(
+      `Gap classification failed for ${failures.length} cluster(s). ` +
+        `${gapsCreated} cluster(s) completed successfully. ` +
+        `First error: ${firstMessage}`
+    );
   }
 
   return { gapsCreated };
@@ -55,19 +102,40 @@ export async function runGapClassification(
 async function processCluster(
   zendeskAccountId: number,
   analysisRunId: number,
-  cluster: Awaited<ReturnType<typeof getClustersForRun>>[number]
+  cluster: Awaited<
+    ReturnType<typeof getClustersForRun>
+  >[number]
 ): Promise<void> {
-  const representativeIds = (cluster.representative_ticket_ids ?? []).map(Number);
-  const representativeTickets = await getTicketsByIds(representativeIds);
+  const representativeIds = (
+    cluster.representative_ticket_ids ?? []
+  ).map(Number);
+
+  const representativeTickets =
+    await getTicketsByIds(
+      representativeIds,
+      zendeskAccountId
+    );
+
   const excerpts = representativeTickets.map(
-    (t) => `${t.subject ?? ""} — ${t.description ?? ""}`.trim()
+    (ticket) =>
+      `${ticket.subject ?? ""} — ${
+        ticket.description ?? ""
+      }`.trim()
   );
 
-  const centroidResult = await pool.query<{ centroid_embedding: string }>(
-    `SELECT centroid_embedding FROM ticket_clusters WHERE id = $1`,
-    [cluster.id]
-  );
-  const centroidStr = centroidResult.rows[0].centroid_embedding;
+  const centroidResult =
+    await pool.query<{
+      centroid_embedding: string;
+    }>(
+      `SELECT centroid_embedding
+       FROM ticket_clusters
+       WHERE id = $1`,
+      [cluster.id]
+    );
+
+  const centroidStr =
+    centroidResult.rows[0].centroid_embedding;
+
   const topicEmbedding = centroidStr
     .replace(/^\[|\]$/g, "")
     .split(",")
@@ -75,7 +143,9 @@ async function processCluster(
 
   const result = await classifyGap({
     zendeskAccountId,
-    topicSummary: cluster.topic_summary ?? cluster.topic_label,
+    topicSummary:
+      cluster.topic_summary ??
+      cluster.topic_label,
     topicEmbedding,
     ticketVolume: cluster.ticket_count,
     representativeTicketExcerpts: excerpts,
@@ -87,9 +157,11 @@ async function processCluster(
     clusterId: cluster.id,
     topicSummary: cluster.topic_label,
     classification: result.classification,
-    estimatedTicketVolume: cluster.ticket_count,
+    estimatedTicketVolume:
+      cluster.ticket_count,
     priorityScore: result.priorityScore,
-    relatedGuideArticleId: result.relatedGuideArticleId,
+    relatedGuideArticleId:
+      result.relatedGuideArticleId,
     similarityScore: result.similarityScore,
     justification: result.justification,
     topicEmbedding,

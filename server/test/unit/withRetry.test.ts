@@ -20,7 +20,7 @@ describe("withRetry", () => {
     const resultPromise = withRetry(fn);
 
     const resultAssertion = expect(resultPromise).resolves.toBe(
-      "success",
+      "success"
     );
 
     await vi.runAllTimersAsync();
@@ -37,7 +37,7 @@ describe("withRetry", () => {
 
       if (attempts < 3) {
         throw new Error(
-          "429 RESOURCE_EXHAUSTED: rate limit exceeded",
+          "429 RESOURCE_EXHAUSTED: rate limit exceeded"
         );
       }
 
@@ -47,7 +47,7 @@ describe("withRetry", () => {
     const resultPromise = withRetry(fn);
 
     const resultAssertion = expect(resultPromise).resolves.toBe(
-      "success after retries",
+      "success after retries"
     );
 
     // 1s + 2s exponential backoff.
@@ -57,15 +57,15 @@ describe("withRetry", () => {
     expect(fn).toHaveBeenCalledTimes(3);
   });
 
-  it("does NOT retry on a non-rate-limit error", async () => {
+  it("does NOT retry on a non-retryable error", async () => {
     const fn = vi.fn().mockRejectedValue(
-      new Error("Invalid API key"),
+      new Error("Invalid API key")
     );
 
     const resultPromise = withRetry(fn);
 
     const resultAssertion = expect(resultPromise).rejects.toThrow(
-      "Invalid API key",
+      "Invalid API key"
     );
 
     await vi.runAllTimersAsync();
@@ -82,7 +82,7 @@ describe("withRetry", () => {
 
       if (attempts < 3) {
         throw new Error(
-          '{"error":{"code":503,"status":"UNAVAILABLE","message":"This model is currently experiencing high demand"}}',
+          '{"error":{"code":503,"status":"UNAVAILABLE","message":"This model is currently experiencing high demand"}}'
         );
       }
 
@@ -92,7 +92,7 @@ describe("withRetry", () => {
     const resultPromise = withRetry(fn);
 
     const resultAssertion = expect(resultPromise).resolves.toBe(
-      "success after 503 retries",
+      "success after 503 retries"
     );
 
     // 1s + 2s exponential backoff.
@@ -102,15 +102,123 @@ describe("withRetry", () => {
     expect(fn).toHaveBeenCalledTimes(3);
   });
 
+  it("retries on ENOTFOUND and eventually succeeds", async () => {
+    let attempts = 0;
+
+    const fn = vi.fn().mockImplementation(async () => {
+      attempts++;
+
+      if (attempts < 2) {
+        throw new Error(
+          "getaddrinfo ENOTFOUND generativelanguage.googleapis.com"
+        );
+      }
+
+      return "success after DNS retry";
+    });
+
+    const resultPromise = withRetry(fn);
+
+    const resultAssertion = expect(resultPromise).resolves.toBe(
+      "success after DNS retry"
+    );
+
+    await vi.runAllTimersAsync();
+    await resultAssertion;
+
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries on UND_ERR_CONNECT_TIMEOUT and eventually succeeds", async () => {
+    let attempts = 0;
+
+    const fn = vi.fn().mockImplementation(async () => {
+      attempts++;
+
+      if (attempts < 2) {
+        throw new Error("UND_ERR_CONNECT_TIMEOUT");
+      }
+
+      return "success after connection retry";
+    });
+
+    const resultPromise = withRetry(fn);
+
+    const resultAssertion = expect(resultPromise).resolves.toBe(
+      "success after connection retry"
+    );
+
+    await vi.runAllTimersAsync();
+    await resultAssertion;
+
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries when fetch failed contains a transient network cause", async () => {
+    let attempts = 0;
+
+    const fn = vi.fn().mockImplementation(async () => {
+      attempts++;
+
+      if (attempts < 2) {
+        const error = new Error("fetch failed");
+
+        error.cause = new Error(
+          "connect ETIMEDOUT 142.250.0.1:443"
+        );
+
+        throw error;
+      }
+
+      return "success after fetch retry";
+    });
+
+    const resultPromise = withRetry(fn);
+
+    const resultAssertion = expect(resultPromise).resolves.toBe(
+      "success after fetch retry"
+    );
+
+    await vi.runAllTimersAsync();
+    await resultAssertion;
+
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries on ECONNRESET", async () => {
+    let attempts = 0;
+
+    const fn = vi.fn().mockImplementation(async () => {
+      attempts++;
+
+      if (attempts < 2) {
+        throw new Error("read ECONNRESET");
+      }
+
+      return "success after reset";
+    });
+
+    const resultPromise = withRetry(fn);
+
+    const resultAssertion = expect(resultPromise).resolves.toBe(
+      "success after reset"
+    );
+
+    await vi.runAllTimersAsync();
+    await resultAssertion;
+
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
   it("throws after exhausting max retries on persistent rate limiting", async () => {
     const fn = vi.fn().mockRejectedValue(
-      new Error("429 rate limit"),
+      new Error("429 rate limit")
     );
 
     const resultPromise = withRetry(fn);
 
     const resultAssertion = expect(resultPromise).rejects.toThrow(
-      "429 rate limit",
+      "429 rate limit"
     );
 
     // 1s + 2s + 4s + 8s + 16s = 31s virtual time.

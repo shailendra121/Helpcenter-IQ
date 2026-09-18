@@ -23,9 +23,14 @@ interface NonGoodGapRow {
 
 /**
  * Generates recommendations for every non-Good gap in an analysis run.
- * Depends on HCIQ-11 (gaps must be classified). Idempotent — regeneration
- * replaces prior recommendations, per scope item #3
- * ("regeneration replaces prior recommendations").
+ *
+ * Regeneration replaces the prior recommendation for a gap only after
+ * a new recommendation has been generated successfully.
+ *
+ * Individual gaps are processed with Promise.allSettled() so work already
+ * in a batch can finish, but any rejected gap causes the overall stage to
+ * throw after processing. This allows HCIQ-14 to mark the recommendation
+ * stage as failed instead of incorrectly completing a partially successful run.
  */
 export async function runRecommendationGeneration(
   zendeskAccountId: number,
@@ -43,6 +48,7 @@ export async function runRecommendationGeneration(
   const gaps = gapsResult.rows;
 
   let recommendationsCreated = 0;
+  const failures: unknown[] = [];
 
   for (let i = 0; i < gaps.length; i += BATCH_SIZE) {
     const batch = gaps.slice(i, i + BATCH_SIZE);
@@ -55,14 +61,28 @@ export async function runRecommendationGeneration(
       if (result.status === "fulfilled") {
         recommendationsCreated++;
       } else {
-        // Per-gap error isolation — one gap's malformed/failed
-        // recommendation shouldn't abort the whole run.
+        failures.push(result.reason);
+
         console.error(
           "Failed to generate a recommendation for a gap:",
           result.reason
         );
       }
     }
+  }
+
+  if (failures.length > 0) {
+    const firstFailure = failures[0];
+    const firstMessage =
+      firstFailure instanceof Error
+        ? firstFailure.message
+        : String(firstFailure);
+
+    throw new Error(
+      `Recommendation generation failed for ${failures.length} gap(s). ` +
+        `${recommendationsCreated} recommendation(s) completed successfully. ` +
+        `First error: ${firstMessage}`
+    );
   }
 
   return { recommendationsCreated };
@@ -86,7 +106,10 @@ async function processGap(
     clusterResult.rows[0]?.representative_ticket_ids ?? []
   ).map(Number);
 
-  const representativeTickets = await getTicketsByIds(representativeIds);
+  const representativeTickets = await getTicketsByIds(
+    representativeIds,
+    zendeskAccountId
+  );
 
   const excerpts = representativeTickets.map(
     (t) => `${t.subject ?? ""} — ${t.description ?? ""}`.trim()
@@ -124,8 +147,8 @@ async function processGap(
   const recommendation = await generateRecommendation(promptInput);
 
   // Only DELETE + INSERT are inside the transaction.
-  // This guarantees that if INSERT fails after DELETE, the DELETE
-  // is rolled back and the previous recommendation is preserved.
+  // If INSERT fails after DELETE, the transaction rolls back and the
+  // previous recommendation remains preserved.
   const client = await pool.connect();
 
   try {
