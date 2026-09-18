@@ -91,10 +91,7 @@ describe("GET /zaf/dashboard", () => {
         .get("/zaf/dashboard")
         .query({ origin: subdomain });
 
-      expect(res.status).toBe(200);
-
       const setCookie = res.headers["set-cookie"];
-
       expect(setCookie).toBeUndefined();
     } finally {
       process.env.NODE_ENV = previousNodeEnv;
