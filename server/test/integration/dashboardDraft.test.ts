@@ -11,17 +11,39 @@ const { mockGenerateDraftForGap } = vi.hoisted(() => ({
   mockGenerateDraftForGap: vi.fn(),
 }));
 
-vi.mock("../../src/drafts/runDraftGeneration.js", () => ({
-  generateDraftForGap: mockGenerateDraftForGap,
-}));
+vi.mock(
+  "../../src/drafts/runDraftGeneration.js",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("../../src/drafts/runDraftGeneration.js")
+      >();
+
+    return {
+      ...actual,
+      generateDraftForGap:
+        mockGenerateDraftForGap,
+    };
+  },
+);
 
 import app from "../../src/app.js";
 import { createZafSessionToken } from "../../src/auth/zafSession.js";
+import {
+  KnowledgeGapMissingClusterError,
+  KnowledgeGapNotFoundError,
+} from "../../src/drafts/runDraftGeneration.js";
+
+const TEST_APP_ORIGIN =
+  "https://helpcenteriq.test";
 
 describe("HCIQ-15 dashboard draft API", () => {
   beforeEach(() => {
     process.env.ZAF_SESSION_SECRET =
       "test-secret-for-hciq-dashboard-auth-123456";
+
+    process.env.APP_ORIGIN =
+      TEST_APP_ORIGIN;
 
     vi.clearAllMocks();
   });
@@ -36,7 +58,59 @@ describe("HCIQ-15 dashboard draft API", () => {
       "ZAF-authenticated session required",
     );
 
-    expect(mockGenerateDraftForGap).not.toHaveBeenCalled();
+    expect(
+      mockGenerateDraftForGap,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("rejects authenticated draft generation when Origin is missing", async () => {
+    const sessionToken = createZafSessionToken(
+      1,
+      "d3v-astonous",
+    );
+
+    const response = await request(app)
+      .post("/api/dashboard/gaps/10/drafts")
+      .set(
+        "Cookie",
+        `hciq_zaf_session=${sessionToken}`,
+      );
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe(
+      "Trusted request origin required",
+    );
+
+    expect(
+      mockGenerateDraftForGap,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("rejects authenticated draft generation from an untrusted Origin", async () => {
+    const sessionToken = createZafSessionToken(
+      1,
+      "d3v-astonous",
+    );
+
+    const response = await request(app)
+      .post("/api/dashboard/gaps/10/drafts")
+      .set(
+        "Cookie",
+        `hciq_zaf_session=${sessionToken}`,
+      )
+      .set(
+        "Origin",
+        "https://attacker.example.com",
+      );
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe(
+      "Untrusted request origin",
+    );
+
+    expect(
+      mockGenerateDraftForGap,
+    ).not.toHaveBeenCalled();
   });
 
   it("rejects a non-integer gap id", async () => {
@@ -50,21 +124,23 @@ describe("HCIQ-15 dashboard draft API", () => {
       .set(
         "Cookie",
         `hciq_zaf_session=${sessionToken}`,
-      );
+      )
+      .set("Origin", TEST_APP_ORIGIN);
 
     expect(response.status).toBe(400);
     expect(response.body.error).toBe(
       "Gap id must be an integer",
     );
 
-    expect(mockGenerateDraftForGap).not.toHaveBeenCalled();
+    expect(
+      mockGenerateDraftForGap,
+    ).not.toHaveBeenCalled();
   });
 
   it("returns 404 when the gap is not found or belongs to another account", async () => {
     mockGenerateDraftForGap.mockRejectedValueOnce(
-      new Error("Knowledge gap not found"),
+      new KnowledgeGapNotFoundError(999),
     );
-
     const sessionToken = createZafSessionToken(
       1,
       "d3v-astonous",
@@ -75,7 +151,8 @@ describe("HCIQ-15 dashboard draft API", () => {
       .set(
         "Cookie",
         `hciq_zaf_session=${sessionToken}`,
-      );
+      )
+      .set("Origin", TEST_APP_ORIGIN);
 
     expect(response.status).toBe(404);
     expect(response.body.error).toBe(
@@ -85,11 +162,8 @@ describe("HCIQ-15 dashboard draft API", () => {
 
   it("returns 422 when the gap has no associated cluster", async () => {
     mockGenerateDraftForGap.mockRejectedValueOnce(
-      new Error(
-        "Knowledge gap 10 has no associated cluster",
-      ),
-    );
-
+      new KnowledgeGapMissingClusterError(10),
+     );
     const sessionToken = createZafSessionToken(
       1,
       "d3v-astonous",
@@ -100,7 +174,8 @@ describe("HCIQ-15 dashboard draft API", () => {
       .set(
         "Cookie",
         `hciq_zaf_session=${sessionToken}`,
-      );
+      )
+      .set("Origin", TEST_APP_ORIGIN);
 
     expect(response.status).toBe(422);
     expect(response.body.error).toBe(
@@ -108,7 +183,7 @@ describe("HCIQ-15 dashboard draft API", () => {
     );
   });
 
-  it("generates a draft for the authenticated account", async () => {
+  it("generates a draft for the authenticated account from the trusted application Origin", async () => {
     mockGenerateDraftForGap.mockResolvedValueOnce({
       draftId: 500,
     });
@@ -123,7 +198,8 @@ describe("HCIQ-15 dashboard draft API", () => {
       .set(
         "Cookie",
         `hciq_zaf_session=${sessionToken}`,
-      );
+      )
+      .set("Origin", TEST_APP_ORIGIN);
 
     expect(response.status).toBe(201);
 
@@ -132,7 +208,9 @@ describe("HCIQ-15 dashboard draft API", () => {
       gap_id: 10,
     });
 
-    expect(mockGenerateDraftForGap).toHaveBeenCalledWith(
+    expect(
+      mockGenerateDraftForGap,
+    ).toHaveBeenCalledWith(
       1,
       10,
     );
@@ -153,7 +231,8 @@ describe("HCIQ-15 dashboard draft API", () => {
       .set(
         "Cookie",
         `hciq_zaf_session=${sessionToken}`,
-      );
+      )
+      .set("Origin", TEST_APP_ORIGIN);
 
     expect(response.status).toBe(500);
     expect(response.body.error).toBe(

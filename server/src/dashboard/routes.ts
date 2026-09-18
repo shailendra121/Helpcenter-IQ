@@ -1,11 +1,13 @@
 import { Router } from "express";
 import type { AuthenticatedZafRequest } from "../auth/zafSession.js";
 import { requireZafSession } from "../auth/zafSession.js";
+import { requireTrustedOrigin } from "../auth/requireTrustedOrigin.js";
 import { pool } from "../db/pool.js";
 import {
   generateDraftForGap,
+  KnowledgeGapMissingClusterError,
+  KnowledgeGapNotFoundError,
 } from "../drafts/runDraftGeneration.js";
-
 
 const router = Router();
 
@@ -605,7 +607,7 @@ router.get("/gaps/:id", async (rawReq, res) => {
  *
  * Generates one draft article for the selected non-Good gap.
  */
-router.post("/gaps/:id/drafts", async (rawReq, res) => {
+router.post("/gaps/:id/drafts", requireTrustedOrigin, async (rawReq, res) => {
   const req = rawReq as unknown as AuthenticatedZafRequest;
 
   try {
@@ -629,22 +631,18 @@ router.post("/gaps/:id/drafts", async (rawReq, res) => {
       gap_id: gapId,
     });
   } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message === "Knowledge gap not found"
-    ) {
-      return res.status(404).json({
-        error: `Knowledge gap ${req.params.id} not found`,
-      });
-    }
+    if (error instanceof KnowledgeGapNotFoundError) {
+  return res.status(404).json({
+    error: error.message,
+  });
+}
 
-    if (
-      error instanceof Error &&
-      error.message.includes("has no associated cluster")
-    ) {
-      return res.status(422).json({
-        error: error.message,
-      });
+if (
+  error instanceof KnowledgeGapMissingClusterError
+) {
+  return res.status(422).json({
+    error: error.message,
+  });
     }
 
     console.error(

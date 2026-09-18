@@ -203,14 +203,7 @@ router.get("/zaf/dashboard", async (req, res) => {
     .replace(/^https?:\/\//, "")
     .replace(/\.zendesk\.com$/, "");
 
-  const development =
-    process.env.NODE_ENV !== "production";
-
-  return serveDashboardFor(
-    subdomain,
-    res,
-    development,
-  );
+  return serveDashboardFor(subdomain, res, false);
 });
 async function serveDashboardFor(
   subdomain: string,

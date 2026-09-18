@@ -34,6 +34,9 @@ import {
   createZafSessionToken,
 } from "../../src/auth/zafSession.js";
 
+const TEST_APP_ORIGIN =
+  "https://helpcenteriq.test";
+
 const mockCreateQueuedRun =
   vi.mocked(createQueuedRun);
 
@@ -46,6 +49,9 @@ describe(
     beforeEach(() => {
       process.env.ZAF_SESSION_SECRET =
         "test-secret-for-hciq-dashboard-auth-123456";
+
+      process.env.APP_ORIGIN =
+        TEST_APP_ORIGIN;
 
       vi.clearAllMocks();
     });
@@ -93,6 +99,72 @@ describe(
     );
 
     it(
+      "rejects analysis-run creation when Origin is missing",
+      async () => {
+        const sessionToken =
+          createZafSessionToken(
+            1,
+            "d3v-astonous",
+          );
+
+        const response = await request(app)
+          .post("/api/analysis-runs")
+          .set(
+            "Cookie",
+            `hciq_zaf_session=${sessionToken}`,
+          )
+          .send({
+            windowDays: 30,
+          });
+
+        expect(response.status).toBe(403);
+
+        expect(response.body.error).toBe(
+          "Trusted request origin required",
+        );
+
+        expect(
+          mockCreateQueuedRun,
+        ).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "rejects analysis-run creation from an untrusted Origin",
+      async () => {
+        const sessionToken =
+          createZafSessionToken(
+            1,
+            "d3v-astonous",
+          );
+
+        const response = await request(app)
+          .post("/api/analysis-runs")
+          .set(
+            "Cookie",
+            `hciq_zaf_session=${sessionToken}`,
+          )
+          .set(
+            "Origin",
+            "https://attacker.example.com",
+          )
+          .send({
+            windowDays: 30,
+          });
+
+        expect(response.status).toBe(403);
+
+        expect(response.body.error).toBe(
+          "Untrusted request origin",
+        );
+
+        expect(
+          mockCreateQueuedRun,
+        ).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
       "uses the authenticated session account instead of a client-supplied account id",
       async () => {
         mockCreateQueuedRun.mockResolvedValue({
@@ -120,6 +192,10 @@ describe(
           .set(
             "Cookie",
             `hciq_zaf_session=${sessionToken}`,
+          )
+          .set(
+            "Origin",
+            TEST_APP_ORIGIN,
           )
           .send({
             windowDays: 30,
@@ -190,6 +266,9 @@ describe(
     beforeEach(() => {
       process.env.ZAF_SESSION_SECRET =
         "test-secret-for-hciq-dashboard-auth-123456";
+
+      process.env.APP_ORIGIN =
+        TEST_APP_ORIGIN;
 
       vi.clearAllMocks();
     });

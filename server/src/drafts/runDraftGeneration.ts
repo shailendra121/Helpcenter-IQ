@@ -5,9 +5,25 @@ import { generateDraftArticle } from "./generateDraftArticle.js";
 
 const BATCH_SIZE = 5;
 
+export class KnowledgeGapNotFoundError extends Error {
+  constructor(public readonly gapId: number) {
+    super(`Knowledge gap ${gapId} not found`);
+    this.name = "KnowledgeGapNotFoundError";
+  }
+}
+
+export class KnowledgeGapMissingClusterError extends Error {
+  constructor(public readonly gapId: number) {
+    super(
+      `Knowledge gap ${gapId} has no associated cluster`,
+    );
+    this.name = "KnowledgeGapMissingClusterError";
+  }
+}
+
 interface NonGoodGapRow {
   id: number;
-  cluster_id: number;
+  cluster_id: number | null;
   topic_summary: string;
   classification: "missing" | "weak" | "outdated";
   related_guide_article_id: number | null;
@@ -96,14 +112,14 @@ export async function generateDraftForGap(
   const gap = gapResult.rows[0];
 
   if (!gap) {
-    throw new Error("Knowledge gap not found");
-  }
+  throw new KnowledgeGapNotFoundError(gapId);
+}
 
-  if (gap.cluster_id === null) {
-    throw new Error(
-      `Knowledge gap ${gapId} has no associated cluster`,
-    );
-  }
+if (gap.cluster_id === null) {
+  throw new KnowledgeGapMissingClusterError(
+    gapId,
+  );
+}
 
   const draftId = await processGapDraft(
     zendeskAccountId,

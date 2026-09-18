@@ -172,6 +172,9 @@ export default function DashboardPage() {
   const [error, setError] =
     useState("");
 
+  const [gapsError, setGapsError] =
+  useState("");
+
   /*
    * Fetch the authenticated Zendesk tenant represented
    * by the signed ZAF dashboard session.
@@ -284,41 +287,64 @@ export default function DashboardPage() {
     }, []);
 
   /*
-   * Initial dashboard load.
-   */
-  useEffect(() => {
-    const loadDashboard =
-      async () => {
-        try {
-          setLoading(true);
-          setError("");
+ * Initial dashboard load.
+ *
+ * Session, summary, and latest-run state do not depend on the
+ * knowledge-gap filters. Keeping them in a separate effect prevents
+ * classification/sort changes from reloading the whole dashboard.
+ */
+useEffect(() => {
+  const loadDashboard = async () => {
+    try {
+      setLoading(true);
+      setError("");
 
-          await Promise.all([
-            fetchDashboardSession(),
-            fetchSummary(),
-            fetchGaps(),
-          ]);
+      await Promise.all([
+        fetchDashboardSession(),
+        fetchSummary(),
+        fetchLatestRun(),
+      ]);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to load dashboard.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
 
-          await fetchLatestRun();
-        } catch (err) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Failed to load dashboard.",
-          );
-        } finally {
-          setLoading(false);
-        }
-      };
+  void loadDashboard();
+}, [
+  fetchDashboardSession,
+  fetchSummary,
+  fetchLatestRun,
+]);
 
-    void loadDashboard();
-  }, [
-    fetchDashboardSession,
-    fetchSummary,
-    fetchGaps,
-    fetchLatestRun,
-  ]);
+/*
+ * Fetch the knowledge-gap list independently.
+ *
+ * Changing classification or sort only changes fetchGaps, so those
+ * controls refresh the gap list without refetching the session,
+ * summary, or latest analysis run.
+ */
+useEffect(() => {
+  const loadGaps = async () => {
+    try {
+      setGapsError("");
+      await fetchGaps();
+    } catch (err) {
+      setGapsError(
+        err instanceof Error
+          ? err.message
+          : "Failed to fetch knowledge gaps.",
+      );
+    }
+  };
 
+  void loadGaps();
+}, [fetchGaps]);
   /*
    * Poll active run.
    *
@@ -1217,17 +1243,32 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {gaps.length === 0 ? (
-              <p
-                style={{
-                  color:
-                    "#6b7280",
-                }}
-              >
-                No gaps match this
-                view.
-              </p>
-            ) : (
+            {gapsError ? (
+  <p
+    role="alert"
+    style={{
+      color: "#b91c1c",
+    }}
+  >
+    Unable to load knowledge gaps.
+  </p>
+) : !run ? (
+  <p
+    style={{
+      color: "#6b7280",
+    }}
+  >
+    No analysis runs yet. Start an analysis to identify knowledge gaps.
+  </p>
+) : gaps.length === 0 ? (
+  <p
+    style={{
+      color: "#6b7280",
+    }}
+  >
+    No gaps match this view.
+  </p>
+) : (
               <div
                 style={{
                   overflowX:

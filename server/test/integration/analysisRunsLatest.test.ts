@@ -1,4 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import request from "supertest";
 
 vi.mock("../../src/db/models/analysisRuns.js", async () => {
@@ -9,16 +15,16 @@ vi.mock("../../src/db/models/analysisRuns.js", async () => {
 
   return {
     ...actual,
-    getActiveRunForAccount: vi.fn(),
+    getLatestRunForAccount: vi.fn(),
   };
 });
 
 import app from "../../src/app.js";
-import { getActiveRunForAccount } from "../../src/db/models/analysisRuns.js";
+import { getLatestRunForAccount } from "../../src/db/models/analysisRuns.js";
 import { createZafSessionToken } from "../../src/auth/zafSession.js";
 
-const mockGetActiveRunForAccount = vi.mocked(
-  getActiveRunForAccount,
+const mockGetLatestRunForAccount = vi.mocked(
+  getLatestRunForAccount,
 );
 
 describe("GET /api/analysis-runs/latest", () => {
@@ -40,12 +46,12 @@ describe("GET /api/analysis-runs/latest", () => {
     );
 
     expect(
-      mockGetActiveRunForAccount,
+      mockGetLatestRunForAccount,
     ).not.toHaveBeenCalled();
   });
 
-  it("returns null when there is no active run", async () => {
-    mockGetActiveRunForAccount.mockResolvedValue(null);
+  it("returns null when there is no previous run", async () => {
+    mockGetLatestRunForAccount.mockResolvedValue(null);
 
     const sessionToken = createZafSessionToken(
       1,
@@ -65,12 +71,12 @@ describe("GET /api/analysis-runs/latest", () => {
     });
 
     expect(
-      mockGetActiveRunForAccount,
+      mockGetLatestRunForAccount,
     ).toHaveBeenCalledWith(1);
   });
 
   it("returns the authenticated account's queued run", async () => {
-    mockGetActiveRunForAccount.mockResolvedValue({
+    mockGetLatestRunForAccount.mockResolvedValue({
       id: 300,
       zendesk_account_id: 1,
       window_days: 30,
@@ -111,12 +117,12 @@ describe("GET /api/analysis-runs/latest", () => {
     });
 
     expect(
-      mockGetActiveRunForAccount,
+      mockGetLatestRunForAccount,
     ).toHaveBeenCalledWith(1);
   });
 
   it("returns the authenticated account's running run", async () => {
-    mockGetActiveRunForAccount.mockResolvedValue({
+    mockGetLatestRunForAccount.mockResolvedValue({
       id: 301,
       zendesk_account_id: 1,
       window_days: 60,
@@ -164,12 +170,87 @@ describe("GET /api/analysis-runs/latest", () => {
     );
 
     expect(
-      mockGetActiveRunForAccount,
+      mockGetLatestRunForAccount,
+    ).toHaveBeenCalledWith(1);
+  });
+
+  it("returns a failed run with its failure details after reload", async () => {
+    mockGetLatestRunForAccount.mockResolvedValue({
+      id: 302,
+      zendesk_account_id: 1,
+      window_days: 90,
+      status: "failed",
+      current_stage: "classification",
+      error_stage: "classification",
+      error_message: "AI classification failed",
+      started_at: new Date(
+        "2026-09-10T04:00:00.000Z",
+      ),
+      completed_at: null,
+      stage_timestamps: {
+        ticket_ingestion: {
+          started_at:
+            "2026-09-10T04:00:00.000Z",
+          completed_at:
+            "2026-09-10T04:01:00.000Z",
+        },
+        guide_ingestion: {
+          started_at:
+            "2026-09-10T04:01:00.000Z",
+          completed_at:
+            "2026-09-10T04:02:00.000Z",
+        },
+        clustering: {
+          started_at:
+            "2026-09-10T04:02:00.000Z",
+          completed_at:
+            "2026-09-10T04:03:00.000Z",
+        },
+        classification: {
+          started_at:
+            "2026-09-10T04:03:00.000Z",
+        },
+      },
+      ingestion_cursor: null,
+    });
+
+    const sessionToken = createZafSessionToken(
+      1,
+      "d3v-astonous",
+    );
+
+    const response = await request(app)
+      .get("/api/analysis-runs/latest")
+      .set(
+        "Cookie",
+        `hciq_zaf_session=${sessionToken}`,
+      );
+
+    expect(response.status).toBe(200);
+
+    expect(response.body.run).toMatchObject({
+      id: 302,
+      window_days: 90,
+      status: "failed",
+      current_stage: "classification",
+      error_stage: "classification",
+      error_message: "AI classification failed",
+    });
+
+    expect(
+      response.body.run.stage_timestamps.classification,
+    ).toEqual({
+      started_at:
+        "2026-09-10T04:03:00.000Z",
+    });
+
+    expect(
+      mockGetLatestRunForAccount,
     ).toHaveBeenCalledWith(1);
   });
 
   it("uses only the authenticated account id", async () => {
-    mockGetActiveRunForAccount.mockResolvedValue(null);
+    mockGetLatestRunForAccount.mockResolvedValue(null);
 
     const sessionToken = createZafSessionToken(
       7,
@@ -186,7 +267,7 @@ describe("GET /api/analysis-runs/latest", () => {
     expect(response.status).toBe(200);
 
     expect(
-      mockGetActiveRunForAccount,
+      mockGetLatestRunForAccount,
     ).toHaveBeenCalledWith(7);
   });
 });

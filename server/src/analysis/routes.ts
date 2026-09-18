@@ -1,13 +1,13 @@
 import { Router } from "express";
 import type { AuthenticatedZafRequest } from "../auth/zafSession.js";
 import { requireZafSession } from "../auth/zafSession.js";
+import { requireTrustedOrigin } from "../auth/requireTrustedOrigin.js";
 import {
   ActiveRunExistsError,
   createQueuedRun,
-  getActiveRunForAccount,
+  getLatestRunForAccount,
   getAnalysisRun,
 } from "../db/models/analysisRuns.js";
-
 const router = Router();
 
 /**
@@ -29,7 +29,7 @@ router.use(requireZafSession);
  *   "windowDays": 30
  * }
  */
-router.post("/", async (rawReq, res) => {
+router.post("/",requireTrustedOrigin, async (rawReq, res) => {
   const req = rawReq as unknown as AuthenticatedZafRequest;
 
   try {
@@ -70,11 +70,11 @@ router.post("/", async (rawReq, res) => {
 /**
  * GET /api/analysis-runs/latest
  *
- * Returns the authenticated Zendesk account's currently active
- * analysis run, if one exists.
+ * Returns the authenticated Zendesk account's most recent
+ * analysis run, regardless of status.
  *
- * Used by the dashboard when it loads/reloads so an existing
- * queued/running analysis can be restored and polling can continue.
+ * Used by the dashboard when it loads/reloads so queued,
+ * running, completed, and failed runs can be restored.
  *
  * IMPORTANT: this route must remain above /:id so Express does not
  * interpret "latest" as an analysis-run id.
@@ -83,7 +83,7 @@ router.get("/latest", async (rawReq, res) => {
   const req = rawReq as unknown as AuthenticatedZafRequest;
 
   try {
-    const run = await getActiveRunForAccount(
+    const run = await getLatestRunForAccount(
       req.zafSession.zendeskAccountId,
     );
 
@@ -108,13 +108,13 @@ router.get("/latest", async (rawReq, res) => {
     });
   } catch (error) {
     console.error(
-      "[analysis-api] Failed to get active run:",
-      error,
-    );
+  "[analysis-api] Failed to get latest run:",
+  error,
+);
 
-    return res.status(500).json({
-      error: "Failed to get active analysis run",
-    });
+return res.status(500).json({
+  error: "Failed to get latest analysis run",
+});
   }
 });
 

@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -136,7 +137,7 @@ describe("DashboardPage", () => {
   });
 
   it(
-    "loads and renders the dashboard shell and empty gap state",
+    "loads and renders the dashboard shell and no-runs-yet state",
     async () => {
       render(<DashboardPage />);
 
@@ -160,7 +161,7 @@ describe("DashboardPage", () => {
 
       expect(
         screen.getByText(
-          "No gaps match this view.",
+          "No analysis runs yet. Start an analysis to identify knowledge gaps.",
         ),
       ).toBeInTheDocument();
 
@@ -476,4 +477,595 @@ describe("DashboardPage", () => {
       });
     },
   );
+
+  it(
+    "restores and displays a failed analysis run after page reload",
+    async () => {
+      mockFetch.mockImplementation(
+        (input: RequestInfo | URL) => {
+          const url = String(input);
+
+          if (url === "/api/dashboard/session") {
+            return Promise.resolve(dashboardSessionResponse());
+          }
+
+          if (url === "/api/dashboard/summary") {
+            return Promise.resolve(
+              jsonResponse({
+                summary: {
+                  top_missing_articles: [],
+                  most_repeated_questions: [],
+                  estimated_ticket_volume: 0,
+                  articles_needing_updates: 0,
+                  potential_deflection_estimate: 0,
+                  potential_deflection_label: "Potential deflection estimate",
+                  methodology: "Volume-based MVP estimate",
+                },
+              }),
+            );
+          }
+
+          if (url.startsWith("/api/dashboard/gaps?")) {
+            return Promise.resolve(jsonResponse({ gaps: [] }));
+          }
+
+          if (url === "/api/analysis-runs/latest") {
+            return Promise.resolve(
+              jsonResponse({
+                run: {
+                  id: 91,
+                  window_days: 30,
+                  status: "failed",
+                  current_stage: "classification",
+                  error_stage: "classification",
+                  error_message: "Classification failed",
+                },
+              }),
+            );
+          }
+
+          return Promise.resolve(jsonResponse({}));
+        },
+      );
+
+      render(<DashboardPage />);
+
+      expect(await screen.findByText("Analysis Status")).toBeInTheDocument();
+      expect(screen.getByText("Failed stage:")).toBeInTheDocument();
+      expect(screen.getByText("Classification failed")).toBeInTheDocument();
+      expect(screen.getByText("classification")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Start Analysis" }),
+      ).toBeEnabled();
+    },
+  );
+
+  it(
+    "polls an active run until completion and refreshes dashboard data",
+    async () => {
+      vi.useFakeTimers();
+
+      try {
+        let summaryCalls = 0;
+        let gapCalls = 0;
+
+        mockFetch.mockImplementation((input: RequestInfo | URL) => {
+          const url = String(input);
+
+          if (url === "/api/dashboard/session") {
+            return Promise.resolve(dashboardSessionResponse());
+          }
+
+          if (url === "/api/dashboard/summary") {
+            summaryCalls += 1;
+            return Promise.resolve(
+              jsonResponse({
+                summary: {
+                  top_missing_articles: [],
+                  most_repeated_questions: [],
+                  estimated_ticket_volume: 0,
+                  articles_needing_updates: 0,
+                  potential_deflection_estimate: 0,
+                  potential_deflection_label: "Potential deflection estimate",
+                  methodology: "Volume-based MVP estimate",
+                },
+              }),
+            );
+          }
+
+          if (url.startsWith("/api/dashboard/gaps?")) {
+            gapCalls += 1;
+            return Promise.resolve(jsonResponse({ gaps: [] }));
+          }
+
+          if (url === "/api/analysis-runs/latest") {
+            return Promise.resolve(
+              jsonResponse({
+                run: {
+                  id: 77,
+                  window_days: 30,
+                  status: "running",
+                  current_stage: "classification",
+                  error_stage: null,
+                  error_message: null,
+                },
+              }),
+            );
+          }
+
+          if (url === "/api/analysis-runs/77") {
+            return Promise.resolve(
+              jsonResponse({
+                run: {
+                  id: 77,
+                  window_days: 30,
+                  status: "completed",
+                  current_stage: null,
+                  error_stage: null,
+                  error_message: null,
+                },
+              }),
+            );
+          }
+
+          return Promise.resolve(jsonResponse({}));
+        });
+
+        render(<DashboardPage />);
+
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        expect(
+          screen.getByText("Analysis is currently running..."),
+        ).toBeInTheDocument();
+        expect(summaryCalls).toBe(1);
+        expect(gapCalls).toBe(1);
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(3000);
+        });
+
+        expect(
+          screen.getByText("Analysis completed successfully."),
+        ).toBeInTheDocument();
+        expect(mockFetch).toHaveBeenCalledWith("/api/analysis-runs/77", {
+          credentials: "include",
+        });
+        expect(summaryCalls).toBe(2);
+        expect(gapCalls).toBe(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it(
+    "opens gap details and generates a draft article",
+    async () => {
+      mockFetch.mockImplementation(
+        (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+
+          if (url === "/api/dashboard/session") {
+            return Promise.resolve(dashboardSessionResponse());
+          }
+
+          if (url === "/api/dashboard/summary") {
+            return Promise.resolve(
+              jsonResponse({
+                summary: {
+                  top_missing_articles: [],
+                  most_repeated_questions: [],
+                  estimated_ticket_volume: 5,
+                  articles_needing_updates: 1,
+                  potential_deflection_estimate: 5,
+                  potential_deflection_label: "Potential deflection estimate",
+                  methodology: "Volume-based MVP estimate",
+                },
+              }),
+            );
+          }
+
+          if (url === "/api/dashboard/gaps?sort=priority") {
+            return Promise.resolve(
+              jsonResponse({
+                gaps: [
+                  {
+                    id: 12,
+                    analysis_run_id: 5,
+                    cluster_id: 3,
+                    topic: "Password Reset",
+                    classification: "weak",
+                    ticket_volume: 5,
+                    priority_score: 8,
+                    justification:
+                      "The existing article is missing important resolution steps.",
+                    matched_article_id: 44,
+                    matched_article_title: "How to reset your password",
+                    matched_article_locale: "en-us",
+                    matched_article_url:
+                      "https://d3v-astonous-28503.zendesk.com/hc/en-us/articles/44",
+                    representative_tickets: [],
+                    recommendations: [],
+                  },
+                ],
+              }),
+            );
+          }
+
+          if (url === "/api/analysis-runs/latest") {
+            return Promise.resolve(
+              jsonResponse({
+                run: {
+                  id: 5,
+                  window_days: 30,
+                  status: "completed",
+                  current_stage: null,
+                  error_stage: null,
+                  error_message: null,
+                },
+              }),
+            );
+          }
+
+          if (url === "/api/dashboard/gaps/12" && !init?.method) {
+            return Promise.resolve(
+              jsonResponse({
+                id: 12,
+                analysis_run_id: 5,
+                cluster_id: 3,
+                topic: "Password Reset",
+                classification: "weak",
+                ticket_volume: 5,
+                priority_score: 8,
+                justification:
+                  "The existing article is missing important resolution steps.",
+                matched_article_id: 44,
+                matched_article_title: "How to reset your password",
+                matched_article_locale: "en-us",
+                matched_article_url:
+                  "https://d3v-astonous-28503.zendesk.com/hc/en-us/articles/44",
+                representative_tickets: [
+                  {
+                    id: 1,
+                    zendesk_ticket_id: "101",
+                    subject: "Cannot reset password",
+                    description: "Customer cannot complete password reset.",
+                    status: "solved",
+                    zendesk_url:
+                      "https://d3v-astonous-28503.zendesk.com/agent/tickets/101",
+                  },
+                ],
+                recommendations: [
+                  {
+                    id: 9,
+                    recommendation_type: "add_missing_steps",
+                    rationale:
+                      "Add the missing password reset verification steps.",
+                    suggested_keywords: ["password", "reset"],
+                    suggested_title: null,
+                  },
+                ],
+              }),
+            );
+          }
+
+          if (
+            url === "/api/dashboard/gaps/12/drafts" &&
+            init?.method === "POST"
+          ) {
+            return Promise.resolve(jsonResponse({ id: 88 }));
+          }
+
+          return Promise.resolve(jsonResponse({}));
+        },
+      );
+
+      render(<DashboardPage />);
+
+      expect(await screen.findByText("Password Reset")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "View Details" }));
+
+      expect(
+        await screen.findByText("Classification Justification"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("Cannot reset password", { exact: false }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Add Missing Steps")).toBeInTheDocument();
+      expect(mockFetch).toHaveBeenCalledWith("/api/dashboard/gaps/12", {
+        credentials: "include",
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Generate Draft" }));
+
+      expect(
+        await screen.findByText(
+          "Draft article generated successfully. Draft ID: 88",
+        ),
+      ).toBeInTheDocument();
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/dashboard/gaps/12/drafts",
+        expect.objectContaining({
+          method: "POST",
+          credentials: "include",
+        }),
+      );
+    },
+  );
+
+  it(
+    "handles a 409 by displaying the already-active analysis run",
+    async () => {
+      let latestRunCalls = 0;
+
+      mockFetch.mockImplementation(
+        (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+
+          if (url === "/api/dashboard/session") {
+            return Promise.resolve(dashboardSessionResponse());
+          }
+
+          if (url === "/api/dashboard/summary") {
+            return Promise.resolve(
+              jsonResponse({
+                summary: {
+                  top_missing_articles: [],
+                  most_repeated_questions: [],
+                  estimated_ticket_volume: 0,
+                  articles_needing_updates: 0,
+                  potential_deflection_estimate: 0,
+                  potential_deflection_label: "Potential deflection estimate",
+                  methodology: "Volume-based MVP estimate",
+                },
+              }),
+            );
+          }
+
+          if (url.startsWith("/api/dashboard/gaps?")) {
+            return Promise.resolve(jsonResponse({ gaps: [] }));
+          }
+
+          if (url === "/api/analysis-runs/latest") {
+            latestRunCalls += 1;
+
+            if (latestRunCalls === 1) {
+              return Promise.resolve(jsonResponse({ run: null }));
+            }
+
+            return Promise.resolve(
+              jsonResponse({
+                run: {
+                  id: 73,
+                  window_days: 60,
+                  status: "running",
+                  current_stage: "clustering",
+                  error_stage: null,
+                  error_message: null,
+                },
+              }),
+            );
+          }
+
+          if (url === "/api/analysis-runs" && init?.method === "POST") {
+            return Promise.resolve(
+              jsonResponse(
+                {
+                  error:
+                    "An analysis run is already active for this account.",
+                },
+                409,
+              ),
+            );
+          }
+
+          return Promise.resolve(jsonResponse({}));
+        },
+      );
+
+      render(<DashboardPage />);
+      await screen.findByText("Dashboard Overview");
+
+      fireEvent.click(screen.getByRole("button", { name: "Start Analysis" }));
+
+      expect(
+        await screen.findByText(
+          "An analysis run is already active for this account.",
+        ),
+      ).toBeInTheDocument();
+      expect(await screen.findByText("Analysis Status")).toBeInTheDocument();
+      expect(
+        screen.getByText("Analysis is currently running..."),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Clustering")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Run in progress" }),
+      ).toBeDisabled();
+      expect(latestRunCalls).toBe(2);
+    },
+  );
+  it(
+  "shows the filter-empty state when a run exists but no gaps match",
+  async () => {
+    mockFetch.mockImplementation(
+      (
+        input: RequestInfo | URL,
+      ) => {
+        const url = String(input);
+
+        if (url === "/api/dashboard/session") {
+          return Promise.resolve(
+            dashboardSessionResponse(),
+          );
+        }
+
+        if (url === "/api/dashboard/summary") {
+          return Promise.resolve(
+            jsonResponse({
+              summary: {
+                top_missing_articles: [],
+                most_repeated_questions: [],
+                estimated_ticket_volume: 0,
+                articles_needing_updates: 0,
+                potential_deflection_estimate: 0,
+                potential_deflection_label:
+                  "Potential deflection estimate",
+                methodology:
+                  "Volume-based MVP estimate",
+              },
+            }),
+          );
+        }
+
+        if (
+          url.startsWith(
+            "/api/dashboard/gaps?",
+          )
+        ) {
+          return Promise.resolve(
+            jsonResponse({
+              gaps: [],
+            }),
+          );
+        }
+
+        if (
+          url ===
+          "/api/analysis-runs/latest"
+        ) {
+          return Promise.resolve(
+            jsonResponse({
+              run: {
+                id: 25,
+                window_days: 30,
+                status: "completed",
+                current_stage: null,
+                error_stage: null,
+                error_message: null,
+              },
+            }),
+          );
+        }
+
+        return Promise.resolve(
+          jsonResponse({}),
+        );
+      },
+    );
+
+    render(<DashboardPage />);
+
+    expect(
+      await screen.findByText(
+        "No gaps match this view.",
+      ),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.queryByText(
+        "No analysis runs yet. Start an analysis to identify knowledge gaps.",
+      ),
+    ).not.toBeInTheDocument();
+  },
+);
+
+it(
+  "shows a dedicated error state when knowledge gaps fail to load",
+  async () => {
+    mockFetch.mockImplementation(
+      (
+        input: RequestInfo | URL,
+      ) => {
+        const url = String(input);
+
+        if (url === "/api/dashboard/session") {
+          return Promise.resolve(
+            dashboardSessionResponse(),
+          );
+        }
+
+        if (url === "/api/dashboard/summary") {
+          return Promise.resolve(
+            jsonResponse({
+              summary: {
+                top_missing_articles: [],
+                most_repeated_questions: [],
+                estimated_ticket_volume: 0,
+                articles_needing_updates: 0,
+                potential_deflection_estimate: 0,
+                potential_deflection_label:
+                  "Potential deflection estimate",
+                methodology:
+                  "Volume-based MVP estimate",
+              },
+            }),
+          );
+        }
+
+        if (
+          url.startsWith(
+            "/api/dashboard/gaps?",
+          )
+        ) {
+          return Promise.resolve(
+            jsonResponse(
+              {
+                error:
+                  "Failed to fetch knowledge gaps.",
+              },
+              500,
+            ),
+          );
+        }
+
+        if (
+          url ===
+          "/api/analysis-runs/latest"
+        ) {
+          return Promise.resolve(
+            jsonResponse({
+              run: {
+                id: 26,
+                window_days: 30,
+                status: "completed",
+                current_stage: null,
+                error_stage: null,
+                error_message: null,
+              },
+            }),
+          );
+        }
+
+        return Promise.resolve(
+          jsonResponse({}),
+        );
+      },
+    );
+
+    render(<DashboardPage />);
+
+    expect(
+      await screen.findByRole("alert"),
+    ).toHaveTextContent(
+      "Unable to load knowledge gaps.",
+    );
+
+    expect(
+      screen.queryByText(
+        "No gaps match this view.",
+      ),
+    ).not.toBeInTheDocument();
+
+    expect(
+      screen.queryByText(
+        "No analysis runs yet. Start an analysis to identify knowledge gaps.",
+      ),
+    ).not.toBeInTheDocument();
+  },
+);
 });
