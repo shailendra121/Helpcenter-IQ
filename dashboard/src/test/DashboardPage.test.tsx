@@ -1,5 +1,6 @@
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -1069,4 +1070,177 @@ it(
     ).not.toBeInTheDocument();
   },
 );
+  it("backs off active-run polling and caps the delay at 20 seconds", async () => {
+    vi.useFakeTimers();
+
+    try {
+      // Keep the existing default responses for other endpoints.
+      const defaultFetch = mockFetch.getMockImplementation();
+
+      if (!defaultFetch) {
+        throw new Error("Default fetch mock is not installed.");
+      }
+
+      const activeRun = {
+        id: 77,
+        window_days: 30,
+        status: "running",
+        current_stage: "classification",
+        error_stage: null,
+        error_message: null,
+      };
+
+      mockFetch.mockImplementation(
+        (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+
+          if (
+            url === "/api/analysis-runs/latest" ||
+            url === "/api/analysis-runs/77"
+          ) {
+            return Promise.resolve(
+              jsonResponse({ run: activeRun }),
+            );
+          }
+
+          return defaultFetch(input, init);
+        },
+      );
+
+      await act(async () => {
+        render(<DashboardPage />);
+      });
+
+      expect(
+        screen.getByText("Analysis is currently running..."),
+      ).toBeInTheDocument();
+
+      const countPollRequests = () =>
+        mockFetch.mock.calls.filter(
+          ([input]) => String(input) === "/api/analysis-runs/77",
+        ).length;
+
+      expect(countPollRequests()).toBe(0);
+
+      // Repeated 20s entries verify that the delay stays capped.
+      const expectedDelays = [
+        3000, 5000, 8000, 13000, 20000, 20000, 20000,
+      ];
+
+      for (const [index, delay] of expectedDelays.entries()) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(delay - 1);
+        });
+
+        // No request before the expected delay has elapsed.
+        expect(countPollRequests()).toBe(index);
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1);
+        });
+
+        // Exactly one request when the delay expires.
+        expect(countPollRequests()).toBe(index + 1);
+      }
+    } finally {
+      // Unmount while fake timers are still active.
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+    it.each(["completed", "failed"] as const)(
+    "stops polling when the run becomes %s",
+    async (finalStatus) => {
+      vi.useFakeTimers();
+
+      try {
+        const defaultFetch = mockFetch.getMockImplementation();
+
+        if (!defaultFetch) {
+          throw new Error("Default fetch mock is not installed.");
+        }
+
+        const activeRun = {
+          id: 77,
+          window_days: 30,
+          status: "running",
+          current_stage: "classification",
+          error_stage: null,
+          error_message: null,
+        };
+
+        mockFetch.mockImplementation(
+          (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input);
+
+            if (url === "/api/analysis-runs/latest") {
+              return Promise.resolve(
+                jsonResponse({ run: activeRun }),
+              );
+            }
+
+            if (url === "/api/analysis-runs/77") {
+              return Promise.resolve(
+                jsonResponse({
+                  run: {
+                    ...activeRun,
+                    status: finalStatus,
+                    current_stage: null,
+                    error_stage:
+                      finalStatus === "failed"
+                        ? "classification"
+                        : null,
+                    error_message:
+                      finalStatus === "failed"
+                        ? "Classification failed"
+                        : null,
+                  },
+                }),
+              );
+            }
+
+            return defaultFetch(input, init);
+          },
+        );
+
+        await act(async () => {
+          render(<DashboardPage />);
+        });
+
+        expect(
+          screen.getByText("Analysis is currently running..."),
+        ).toBeInTheDocument();
+
+        const countPollRequests = () =>
+          mockFetch.mock.calls.filter(
+            ([input]) =>
+              String(input) === "/api/analysis-runs/77",
+          ).length;
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(3000);
+        });
+
+        expect(countPollRequests()).toBe(1);
+
+        expect(
+          screen.getByText(
+            finalStatus === "completed"
+              ? "Analysis completed successfully."
+              : "Classification failed",
+          ),
+        ).toBeInTheDocument();
+
+        // No more polling after either terminal status.
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(60000);
+        });
+
+        expect(countPollRequests()).toBe(1);
+      } finally {
+        cleanup();
+        vi.useRealTimers();
+      }
+    },
+  );
 });
