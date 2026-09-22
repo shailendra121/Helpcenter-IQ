@@ -12,6 +12,7 @@ const MAX_RETRIES = 5;
 function getMinIntervalMs(): number {
   return Number(process.env.GEMINI_MIN_INTERVAL_MS ?? 1000);
 }
+
 let lastCallStartedAt = 0;
 let throttleQueue: Promise<void> = Promise.resolve();
 
@@ -21,7 +22,7 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Serializes access to the global throttle and ensures that at least
- * MIN_INTERVAL_MS passes between AI call starts.
+ * GEMINI_MIN_INTERVAL_MS passes between AI call starts.
  */
 async function waitForGlobalThrottle(): Promise<void> {
   let release!: () => void;
@@ -36,7 +37,8 @@ async function waitForGlobalThrottle(): Promise<void> {
 
   try {
     const elapsed = Date.now() - lastCallStartedAt;
-    const remaining = getMinIntervalMs() - elapsed;    
+    const remaining = getMinIntervalMs() - elapsed;
+
     if (remaining > 0) {
       await sleep(remaining);
     }
@@ -48,29 +50,48 @@ async function waitForGlobalThrottle(): Promise<void> {
 }
 
 /**
- * Determines whether an AI error is transient and should be retried.
+ * Determines whether an AI/provider error is transient and should be retried.
  *
- * Covers:
+ * Covers provider-side transient failures:
  * - HTTP 429 / rate limits
  * - Gemini RESOURCE_EXHAUSTED
  * - HTTP 503 / UNAVAILABLE
  * - temporary "high demand" responses
+ *
+ * Covers network-level transient failures:
+ * - ENOTFOUND
+ * - EAI_AGAIN
+ * - ECONNRESET
+ * - ETIMEDOUT
+ * - UND_ERR_CONNECT_TIMEOUT
+ * - fetch failed
+ *
+ * Some Node/undici fetch errors expose the useful network reason through
+ * error.cause rather than the top-level error message, so both are checked.
  */
 function isRetryableAIError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
+  const message =
+    error instanceof Error ? error.message : String(error);
 
-  return /429|rate limit|RESOURCE_EXHAUSTED|503|UNAVAILABLE|high demand/i.test(
-    message,
+  const causeMessage =
+    error instanceof Error && error.cause instanceof Error
+      ? error.cause.message
+      : "";
+
+  const combinedMessage = `${message} ${causeMessage}`;
+
+  return /429|rate limit|RESOURCE_EXHAUSTED|503|UNAVAILABLE|high demand|ENOTFOUND|EAI_AGAIN|ECONNRESET|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT|fetch failed/i.test(
+    combinedMessage
   );
 }
 
 /**
  * Runs an AI provider call with:
  * 1. Global process-wide throttling
- * 2. Exponential backoff for transient Gemini failures
+ * 2. Exponential backoff for transient provider/network failures
  */
 export async function withRetry<T>(
-  fn: () => Promise<T>,
+  fn: () => Promise<T>
 ): Promise<T> {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     await waitForGlobalThrottle();
@@ -89,6 +110,6 @@ export async function withRetry<T>(
   }
 
   throw new Error(
-    "Unreachable: retry loop exited without returning or throwing",
+    "Unreachable: retry loop exited without returning or throwing"
   );
 }

@@ -38,9 +38,8 @@ export async function fetchTicketPage(
   const accessToken = await getValidAccessToken(subdomain);
   const url =
     typeof cursorOrStartTime === "string"
-      ? `https://${subdomain}.zendesk.com/api/v2/incremental/tickets/cursor.json?cursor=${encodeURIComponent(cursorOrStartTime)}`
-      : `https://${subdomain}.zendesk.com/api/v2/incremental/tickets/cursor.json?start_time=${cursorOrStartTime}`;
-
+    ? `https://${subdomain}.zendesk.com/api/v2/incremental/tickets/cursor.json?cursor=${encodeURIComponent(cursorOrStartTime)}&exclude_deleted=true`
+    : `https://${subdomain}.zendesk.com/api/v2/incremental/tickets/cursor.json?start_time=${cursorOrStartTime}&exclude_deleted=true`;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const response = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}` },

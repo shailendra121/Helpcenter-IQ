@@ -127,25 +127,42 @@ describe("runRecommendationGeneration — recommendation replacement", () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it("does not delete the existing recommendation when AI generation fails", async () => {
+  it("preserves the existing recommendation and fails the stage when AI generation fails", async () => {
     mockGenerateRecommendation.mockRejectedValue(
       new Error("AI provider failed")
     );
 
-    const result = await runRecommendationGeneration(1, 2);
+    await expect(
+      runRecommendationGeneration(1, 2)
+    ).rejects.toThrow(
+      "Recommendation generation failed for 1 gap(s)"
+    );
 
-    expect(result.recommendationsCreated).toBe(0);
+    // Tenancy regression protection:
+    // representative ticket lookup must stay scoped
+    // to the Zendesk account.
+    expect(mockGetTicketsByIds).toHaveBeenCalledTimes(1);
+
+    expect(mockGetTicketsByIds).toHaveBeenCalledWith(
+      [100, 101],
+      1
+    );
 
     expect(mockGenerateRecommendation).toHaveBeenCalledTimes(1);
 
-    // The old recommendation must remain untouched when generation fails.
-    expect(mockDeleteRecommendationsForGap).not.toHaveBeenCalled();
-    expect(mockCreateRecommendation).not.toHaveBeenCalled();
+    // Generate-first behavior: the old recommendation remains untouched
+    // if the AI call fails.
+    expect(
+      mockDeleteRecommendationsForGap
+    ).not.toHaveBeenCalled();
 
-    // No transaction should start because generation failed first.
+    expect(
+      mockCreateRecommendation
+    ).not.toHaveBeenCalled();
+
+    // No transaction starts because generation failed before DB replacement.
     expect(mockPoolConnect).not.toHaveBeenCalled();
 
-    // The failure should still be logged.
     expect(consoleErrorSpy).toHaveBeenCalled();
   });
 
@@ -153,6 +170,13 @@ describe("runRecommendationGeneration — recommendation replacement", () => {
     const result = await runRecommendationGeneration(1, 2);
 
     expect(result.recommendationsCreated).toBe(1);
+
+    expect(mockGetTicketsByIds).toHaveBeenCalledTimes(1);
+
+    expect(mockGetTicketsByIds).toHaveBeenCalledWith(
+      [100, 101],
+      1
+    );
 
     expect(mockGenerateRecommendation).toHaveBeenCalledTimes(1);
     expect(mockPoolConnect).toHaveBeenCalledTimes(1);
@@ -183,14 +207,23 @@ describe("runRecommendationGeneration — recommendation replacement", () => {
     expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 
-  it("rolls back the transaction when creating the new recommendation fails", async () => {
+  it("rolls back the transaction and fails the stage when creating the new recommendation fails", async () => {
     mockCreateRecommendation.mockRejectedValue(
       new Error("Database insert failed")
     );
 
-    const result = await runRecommendationGeneration(1, 2);
+    await expect(
+      runRecommendationGeneration(1, 2)
+    ).rejects.toThrow(
+      "Recommendation generation failed for 1 gap(s)"
+    );
 
-    expect(result.recommendationsCreated).toBe(0);
+    expect(mockGetTicketsByIds).toHaveBeenCalledTimes(1);
+
+    expect(mockGetTicketsByIds).toHaveBeenCalledWith(
+      [100, 101],
+      1
+    );
 
     expect(mockDeleteRecommendationsForGap).toHaveBeenCalledWith(
       1,
@@ -206,7 +239,6 @@ describe("runRecommendationGeneration — recommendation replacement", () => {
 
     expect(mockClientRelease).toHaveBeenCalledTimes(1);
 
-    // The error is handled by the per-gap error isolation logic.
     expect(consoleErrorSpy).toHaveBeenCalled();
   });
 });

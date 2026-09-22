@@ -169,7 +169,16 @@ export interface ClassifyGapResult {
  * the branches documented in the story's scope item #2.
  */
 export async function classifyGap(input: ClassifyGapInput): Promise<ClassifyGapResult> {
-  const similarityFloor = Number(process.env.GAP_SIMILARITY_FLOOR ?? 0.55);
+  // HCIQ-11 semantic matching threshold.
+//
+// Calibrated against the seeded classification scenario:
+// unrelated topic/article pairs (~0.56 similarity) must not be
+// considered coverage, while valid matches in the seeded scenario
+// score substantially higher (~0.77-0.79).
+//
+// Configurable through GAP_SIMILARITY_FLOOR so deployments can tune
+// the threshold without changing classification logic.
+  const similarityFloor = Number(process.env.GAP_SIMILARITY_FLOOR ?? 0.60);
 
   const match = await findBestMatchingArticle(
     input.zendeskAccountId,

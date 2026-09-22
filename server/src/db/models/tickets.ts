@@ -16,23 +16,50 @@ export interface TicketInput {
 }
 
 /**
- * Upserts a ticket ΓÇö idempotent per (zendesk_account_id, zendesk_ticket_id).
- * Re-ingesting the same window updates existing rows rather than
- * creating duplicates, satisfying HCIQ-8's idempotency requirement.
+ * Upserts a ticket snapshot — idempotent within an analysis run.
+ *
+ * The same Zendesk ticket may appear in multiple analysis runs.
+ * Each run keeps its own snapshot so later runs do not overwrite
+ * evidence belonging to earlier completed runs.
+ *
+ * If the text used for embeddings changes (subject or description),
+ * the existing embedding is invalidated so clustering will regenerate it.
  */
 export async function upsertTicket(input: TicketInput): Promise<void> {
   await pool.query(
     `INSERT INTO tickets
-       (zendesk_account_id, analysis_run_id, zendesk_ticket_id, subject, description,
-        first_comment, status, tags, zendesk_created_at, copilot_topic, copilot_sentiment, copilot_intent)
+       (
+         zendesk_account_id,
+         analysis_run_id,
+         zendesk_ticket_id,
+         subject,
+         description,
+         first_comment,
+         status,
+         tags,
+         zendesk_created_at,
+         copilot_topic,
+         copilot_sentiment,
+         copilot_intent
+       )
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-     ON CONFLICT (zendesk_account_id, zendesk_ticket_id) DO UPDATE SET
-       analysis_run_id = EXCLUDED.analysis_run_id,
+     ON CONFLICT (
+       zendesk_account_id,
+       analysis_run_id,
+       zendesk_ticket_id
+     ) DO UPDATE SET
+       embedding = CASE
+         WHEN tickets.subject IS DISTINCT FROM EXCLUDED.subject
+           OR tickets.description IS DISTINCT FROM EXCLUDED.description
+         THEN NULL
+         ELSE tickets.embedding
+       END,
        subject = EXCLUDED.subject,
        description = EXCLUDED.description,
        first_comment = EXCLUDED.first_comment,
        status = EXCLUDED.status,
        tags = EXCLUDED.tags,
+       zendesk_created_at = EXCLUDED.zendesk_created_at,
        copilot_topic = EXCLUDED.copilot_topic,
        copilot_sentiment = EXCLUDED.copilot_sentiment,
        copilot_intent = EXCLUDED.copilot_intent`,
@@ -53,11 +80,16 @@ export async function upsertTicket(input: TicketInput): Promise<void> {
   );
 }
 
-export async function countTicketsForAccount(zendeskAccountId: number): Promise<number> {
+export async function countTicketsForAccount(
+  zendeskAccountId: number
+): Promise<number> {
   const result = await pool.query<{ count: string }>(
-    `SELECT COUNT(*) FROM tickets WHERE zendesk_account_id = $1`,
+    `SELECT COUNT(*)
+     FROM tickets
+     WHERE zendesk_account_id = $1`,
     [zendeskAccountId]
   );
+
   return parseInt(result.rows[0].count, 10);
 }
 
@@ -70,63 +102,99 @@ export interface TicketForClustering {
 }
 
 /**
- * Returns tickets for an account within an analysis run that don't yet
- * have an embedding — used by the clustering pipeline (HCIQ-10) to
- * avoid re-embedding tickets that were already processed in a prior run.
+ * Returns tickets for an account within an analysis run that do not yet
+ * have an embedding.
  */
 export async function getTicketsNeedingEmbedding(
   zendeskAccountId: number,
   analysisRunId: number
 ): Promise<TicketForClustering[]> {
   const result = await pool.query<TicketForClustering>(
-    `SELECT id, zendesk_ticket_id, subject, description, embedding
+    `SELECT
+       id,
+       zendesk_ticket_id,
+       subject,
+       description,
+       embedding
      FROM tickets
-     WHERE zendesk_account_id = $1 AND analysis_run_id = $2 AND embedding IS NULL`,
+     WHERE zendesk_account_id = $1
+       AND analysis_run_id = $2
+       AND embedding IS NULL`,
     [zendeskAccountId, analysisRunId]
   );
+
   return result.rows;
 }
 
 /**
- * Returns all tickets for an account within an analysis run that DO
- * have an embedding — used as input to the clustering step itself.
- */
-/**
- * Returns all tickets for an account within an analysis run that DO
- * have an embedding — used as input to the clustering step itself.
- * Ordered by id for deterministic clustering: the greedy algorithm is
- * order-dependent (whichever ticket is processed first seeds a
- * cluster), so without a fixed order, the same input data could
- * cluster differently between runs (flagged during review).
+ * Returns all tickets for an account within an analysis run that
+ * have an embedding.
+ *
+ * Ordered by id for deterministic clustering because the greedy
+ * clustering algorithm is order-dependent.
  */
 export async function getEmbeddedTicketsForRun(
   zendeskAccountId: number,
   analysisRunId: number
 ): Promise<TicketForClustering[]> {
   const result = await pool.query<TicketForClustering>(
-    `SELECT id, zendesk_ticket_id, subject, description, embedding
+    `SELECT
+       id,
+       zendesk_ticket_id,
+       subject,
+       description,
+       embedding
      FROM tickets
-     WHERE zendesk_account_id = $1 AND analysis_run_id = $2 AND embedding IS NOT NULL
+     WHERE zendesk_account_id = $1
+       AND analysis_run_id = $2
+       AND embedding IS NOT NULL
      ORDER BY id`,
     [zendeskAccountId, analysisRunId]
   );
+
   return result.rows;
 }
 
-export async function updateTicketEmbedding(ticketId: number, embedding: number[]): Promise<void> {
-  await pool.query(`UPDATE tickets SET embedding = $1 WHERE id = $2`, [
-    `[${embedding.join(",")}]`,
-    ticketId,
-  ]);
+export async function updateTicketEmbedding(
+  ticketId: number,
+  embedding: number[]
+): Promise<void> {
+  await pool.query(
+    `UPDATE tickets
+     SET embedding = $1
+     WHERE id = $2`,
+    [`[${embedding.join(",")}]`, ticketId]
+  );
 }
 
 export async function getTicketsByIds(
-  ticketIds: number[]
-): Promise<Array<{ id: number; subject: string | null; description: string | null }>> {
-  if (ticketIds.length === 0) return [];
-  const result = await pool.query<{ id: number; subject: string | null; description: string | null }>(
-    `SELECT id, subject, description FROM tickets WHERE id = ANY($1)`,
-    [ticketIds]
+  ticketIds: number[],
+  zendeskAccountId: number
+): Promise<
+  Array<{
+    id: number;
+    subject: string | null;
+    description: string | null;
+  }>
+> {
+  if (ticketIds.length === 0) {
+    return [];
+  }
+
+  const result = await pool.query<{
+    id: number;
+    subject: string | null;
+    description: string | null;
+  }>(
+    `SELECT
+       id,
+       subject,
+       description
+     FROM tickets
+     WHERE id = ANY($1)
+       AND zendesk_account_id = $2`,
+    [ticketIds, zendeskAccountId]
   );
+
   return result.rows;
 }
