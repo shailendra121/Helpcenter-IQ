@@ -25,8 +25,8 @@ app.get("/health", (_req, res) => {
   });
 });
 
-app.use(express.static(dashboardDistPath));
-
 app.use(zendeskRoutes);
+
+app.use(express.static(dashboardDistPath));
 
 export default app;

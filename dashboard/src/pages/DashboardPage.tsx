@@ -345,79 +345,110 @@ useEffect(() => {
 
   void loadGaps();
 }, [fetchGaps]);
-  /*
-   * Poll active run.
-   *
-   * This automatically starts when:
-   * queued -> running
-   *
-   * and stops when:
-   * completed / failed
+   /*
+   * Poll active runs with capped backoff.
+   * Wait 3s, 5s, 8s, 13s, then 20s between requests.
    */
   useEffect(() => {
     if (
       !run ||
-      (run.status !== "queued" &&
-        run.status !== "running")
+      (run.status !== "queued" && run.status !== "running")
     ) {
       return;
     }
 
-    const interval =
-      window.setInterval(async () => {
-        try {
-          const response = await fetch(
-            `/api/analysis-runs/${run.id}`,
-            {
-              credentials: "include",
-            },
-          );
+    const runId = run.id;
+    const delays = [3000, 5000, 8000, 13000, 20000];
+    let delayIndex = 0;
+    let cancelled = false;
+    let finished = false;
+    let timeoutId: number | undefined;
 
-          if (!response.ok) {
-            throw new Error(
-              "Failed to refresh analysis status.",
-            );
-          }
+    const controller = new AbortController();
 
-          const data =
-            await response.json();
+    const scheduleNextPoll = () => {
+      timeoutId = window.setTimeout(() => {
+        void poll();
+      }, delays[delayIndex]);
+    };
 
-          const updatedRun =
-            data.run ?? data;
+    const poll = async () => {
+      try {
+        const response = await fetch(
+          `/api/analysis-runs/${runId}`,
+          {
+            credentials: "include",
+            signal: controller.signal,
+          },
+        );
 
-          setRun(updatedRun);
-
-          /*
-           * Once the run finishes, refresh
-           * dashboard data.
-           */
-          if (
-            updatedRun.status ===
-            "completed"
-          ) {
-            await Promise.all([
-              fetchSummary(),
-              fetchGaps(),
-            ]);
-          }
-        } catch (err) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Failed to refresh analysis status.",
-          );
+        if (!response.ok) {
+          throw new Error("Failed to refresh analysis status.");
         }
-      }, 3000);
 
-    return () =>
-      window.clearInterval(interval);
+        const data = await response.json();
+        const updatedRun = (data.run ?? data) as AnalysisRun;
+
+        if (cancelled) {
+          return;
+        }
+
+        finished =
+          updatedRun.status === "completed" ||
+          updatedRun.status === "failed";
+
+        setRun(updatedRun);
+
+        if (updatedRun.status === "completed") {
+          // Report refresh failures separately from polling failures.
+          void Promise.all([
+            fetchSummary(),
+            fetchGaps(),
+          ]).catch((err: unknown) => {
+            setError(
+              err instanceof Error
+                ? err.message
+                : "Failed to refresh dashboard data.",
+            );
+          });
+        }
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to refresh analysis status.",
+        );
+      } finally {
+        if (!cancelled && !finished) {
+          delayIndex = Math.min(
+            delayIndex + 1,
+            delays.length - 1,
+          );
+          scheduleNextPoll();
+        }
+      }
+    };
+
+    scheduleNextPoll();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    };
   }, [
     run?.id,
     run?.status,
     fetchSummary,
     fetchGaps,
   ]);
-
   /*
    * Start new analysis.
    */

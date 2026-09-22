@@ -633,6 +633,7 @@ describe("DashboardPage", () => {
         ).toBeInTheDocument();
         expect(mockFetch).toHaveBeenCalledWith("/api/analysis-runs/77", {
           credentials: "include",
+          signal: expect.any(AbortSignal),
         });
         expect(summaryCalls).toBe(2);
         expect(gapCalls).toBe(2);
