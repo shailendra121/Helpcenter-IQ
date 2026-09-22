@@ -17,14 +17,23 @@ import { upsertZendeskAccount } from "../../src/db/models/zendeskAccounts.js";
 // req.body.token through, not real JWT validity here.
 vi.mock("fs", () => ({
   default: {
-    readFileSync: vi.fn().mockReturnValue("dummy-public-key-content"),
+    readFileSync: vi.fn().mockReturnValue(
+      "dummy-public-key-content",
+    ),
   },
 }));
 
 process.env.ZAF_APP_PUBLIC_KEY_PATH =
-  process.env.ZAF_APP_PUBLIC_KEY_PATH ?? "./fake-path-for-tests.pem";
+  process.env.ZAF_APP_PUBLIC_KEY_PATH ??
+  "./fake-path-for-tests.pem";
 
-const { default: app } = await import("../../src/app.js");
+process.env.ZENDESK_APP_INSTALLATION_ID =
+  process.env.ZENDESK_APP_INSTALLATION_ID ??
+  "12345";
+
+const { default: app } = await import(
+  "../../src/app.js"
+);
 
 describe("POST /zaf/dashboard", () => {
   it("reads the token from urlencoded form body (not undefined)", async () => {
@@ -36,16 +45,20 @@ describe("POST /zaf/dashboard", () => {
     // We're not testing JWT validity here — just that req.body.token was
     // actually populated (proves urlencoded middleware ran before this
     // route). If middleware order were wrong, req.body.token would be
-    // undefined and we'd get "Missing ZAF signature". Instead, since the
-    // token WAS read, verification proceeds and fails on signature
-    // validity ("Invalid signature") — proving the body was parsed.
+    // undefined and we'd get "Missing ZAF signature". Instead, the token
+    // reaches JWT processing and is rejected as malformed.
     expect(res.status).toBe(401);
-    expect(res.text).not.toContain("Missing ZAF signature");
-    expect(res.text).toContain("Invalid signature");
+    expect(res.text).not.toContain(
+      "Missing ZAF signature",
+    );
+    expect(res.text).toContain("Invalid token claims.");
   });
 
   it("rejects when no token is sent at all (sanity check for the negative case)", async () => {
-    const res = await request(app).post("/zaf/dashboard").type("form").send({});
+    const res = await request(app)
+      .post("/zaf/dashboard")
+      .type("form")
+      .send({});
 
     expect(res.status).toBe(401);
     expect(res.text).toContain(

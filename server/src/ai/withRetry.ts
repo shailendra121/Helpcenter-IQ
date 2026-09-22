@@ -86,9 +86,44 @@ function isRetryableAIError(error: unknown): boolean {
 }
 
 /**
+ * Extracts a provider-suggested retry delay from the error message.
+ *
+ * Gemini 429 errors may include values such as:
+ *   "retryDelay": "40s"
+ *
+ * Returns milliseconds, or null when the provider did not supply one.
+ */
+function getProviderRetryDelayMs(error: unknown): number | null {
+  const message =
+    error instanceof Error ? error.message : String(error);
+
+  const causeMessage =
+    error instanceof Error && error.cause instanceof Error
+      ? error.cause.message
+      : "";
+
+  const combinedMessage = `${message} ${causeMessage}`;
+
+  const match = combinedMessage.match(
+    /["']?retryDelay["']?\s*:\s*["']?(\d+(?:\.\d+)?)s["']?/i
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  const seconds = Number(match[1]);
+
+  return Number.isFinite(seconds)
+    ? Math.ceil(seconds * 1000)
+    : null;
+}
+
+/**
  * Runs an AI provider call with:
  * 1. Global process-wide throttling
  * 2. Exponential backoff for transient provider/network failures
+ * 3. Provider-suggested retry delays when available
  */
 export async function withRetry<T>(
   fn: () => Promise<T>
@@ -103,7 +138,16 @@ export async function withRetry<T>(
         throw error;
       }
 
-      const delayMs = BASE_DELAY_MS * Math.pow(2, attempt);
+      const exponentialDelayMs =
+        BASE_DELAY_MS * Math.pow(2, attempt);
+
+      const providerDelayMs =
+        getProviderRetryDelayMs(error);
+
+      const delayMs = Math.max(
+        exponentialDelayMs,
+        providerDelayMs ?? 0
+      );
 
       await sleep(delayMs);
     }
