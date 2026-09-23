@@ -7,7 +7,6 @@ import fs from "fs";
 import path from "path";
 import { Router } from "express";
 import crypto from "crypto";
-import jwt from "jsonwebtoken";
 import { getOAuthClient } from "../auth/getOAuthClient.js";
 import { encryptToken } from "../auth/tokenEncryption.js";
 import { setZafSessionCookie } from "../auth/zafSession.js";
@@ -117,20 +116,9 @@ router.get("/zendesk/oauth/callback", async (req, res) => {
       expiresAt: tokens.expiresAt,
     });
 
-    return res.status(200).send(`
-  <!doctype html>
-  <html>
-    <head>
-      <meta charset="utf-8" />
-      <title>HelpCenterIQ connected</title>
-    </head>
-    <body>
-      <h2>HelpCenterIQ connected successfully.</h2>
-      <p>Zendesk authorization is complete.</p>
-      <p>You can close this page and reopen HelpCenterIQ in Zendesk.</p>
-    </body>
-  </html>
-`);
+    return res.redirect(
+      `/zaf/dashboard?origin=${encodeURIComponent(pending.subdomain)}`,
+    );
   } catch {
     // Never log/return the raw error, which could contain token data
     // from a failed exchange response.
@@ -178,51 +166,24 @@ router.post("/zaf/dashboard", async (req, res) => {
 
   let claims: { iss?: string; aud?: string };
 
-try {
-  const publicKeyPem = fs.readFileSync(publicKeyPath, "utf8");
-  const installationId =
-    process.env.ZENDESK_APP_INSTALLATION_ID ?? "";
+  try {
+    const publicKeyPem = fs.readFileSync(publicKeyPath, "utf8");
 
-  if (!installationId) {
-    console.error("ZENDESK_APP_INSTALLATION_ID is not set");
-    return res.status(500).send("Server misconfiguration.");
+    const installationId =
+      process.env.ZENDESK_MARKETPLACE_APP_ID ?? "";
+
+    claims = verifyZafJwt(
+      token,
+      publicKeyPem,
+      installationId,
+    ) as typeof claims;
+  } catch {
+    console.error("ZAF JWT verification failed");
+    return res.status(401).send("Invalid signature.");
   }
 
-  // Decode only to obtain the candidate issuer needed to construct the
-  // expected audience. This value is not trusted until verifyZafJwt()
-  // validates the token's signature and audience below.
-  const decoded = jwt.decode(token);
-
-  if (
-    !decoded ||
-    typeof decoded === "string" ||
-    typeof decoded.iss !== "string"
-  ) {
-    return res.status(401).send("Invalid token claims.");
-  }
-
-  const issuerMatch = decoded.iss.match(
-    /^([a-zA-Z0-9-]+)\.zendesk\.com$/,
-  );
-
-  if (!issuerMatch) {
-    return res.status(401).send("Invalid token claims.");
-  }
-
-  const candidateSubdomain = issuerMatch[1];
-
-  claims = verifyZafJwt(
-    token,
-    publicKeyPem,
-    candidateSubdomain,
-    installationId,
-  ) as typeof claims;
-} catch {
-  console.error("ZAF JWT verification failed");
-  return res.status(401).send("Invalid signature.");
-}
-
-const subdomain = claims.iss?.replace(/\.zendesk\.com$/, "");
+  const subdomain = claims.iss
+    ?.replace(/\.zendesk\.com$/, "");
 
   if (!subdomain) {
     return res.status(401).send("Invalid token claims.");
