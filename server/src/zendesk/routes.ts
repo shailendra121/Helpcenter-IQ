@@ -233,7 +233,7 @@ async function serveDashboardFor(
   path.resolve(
     process.cwd(),
     "../dashboard/dist/index.html",
-  ),
+  ), 
 );
 }
 
