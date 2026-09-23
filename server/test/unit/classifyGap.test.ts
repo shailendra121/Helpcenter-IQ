@@ -165,3 +165,67 @@ describe("classifyGap — Missing classification justification (review fix)", ()
     }
   });
 });
+
+describe("classifyGap — semantic relevance validation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("classifies a topic as Missing when the nearest vector-matched article is semantically unrelated", async () => {
+    const { classifyGap } = await import(
+      "../../src/classification/classifyGap.js"
+    );
+
+    // Query 1: vector search returns an article above the similarity floor.
+    mockPoolQuery
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 1,
+            title: "Reset Your Password",
+            distance: 0.3585312938, // similarity ≈ 0.64147
+          },
+        ],
+      })
+      // Query 2: load the matched article.
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            title: "Reset Your Password",
+            clean_text: "Steps for resetting your account password.",
+            zendesk_updated_at: new Date(),
+          },
+        ],
+      });
+
+    // Relevance check says the vector candidate is actually unrelated.
+    mockGenerateText.mockResolvedValueOnce({
+      text:
+        "Verdict: NO\n" +
+        "Reason: The article covers password resets, not billing details.",
+      model: "gemini-3.5-flash-lite",
+    });
+
+    const result = await classifyGap({
+      zendeskAccountId: 1,
+      topicSummary: "Updating Account and Billing Details",
+      topicEmbedding: Array(1536).fill(0.1),
+      ticketVolume: 6,
+      representativeTicketExcerpts: [
+        "How can I update my billing information?",
+        "I need to change my billing details.",
+      ],
+    });
+
+    expect(result.classification).toBe("missing");
+    expect(result.relatedGuideArticleId).toBeNull();
+    expect(result.similarityScore).toBeCloseTo(0.6414687062);
+    expect(result.justification).toContain(
+      "The nearest published article was not relevant"
+    );
+
+    // Only the relevance LLM call should happen.
+    // Weakness evaluation must not run for an unrelated article.
+    expect(mockGenerateText).toHaveBeenCalledTimes(1);
+  });
+});

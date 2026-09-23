@@ -73,6 +73,70 @@ export interface WeaknessCheckResult {
   justification: string;
 }
 
+export interface RelevanceCheckInput {
+  topicSummary: string;
+  representativeTicketExcerpts: string[];
+  articleTitle: string | null;
+  articleText: string;
+}
+
+export interface RelevanceCheckResult {
+  isRelevant: boolean;
+  justification: string;
+}
+
+export async function checkArticleRelevance(
+  input: RelevanceCheckInput
+): Promise<RelevanceCheckResult> {
+  const provider = createAIProvider();
+
+  const rawPrompt = `Determine whether this knowledge base article is about the same customer support topic as the customer questions.
+
+Topic: ${input.topicSummary}
+
+Representative customer questions/excerpts:
+${input.representativeTicketExcerpts.map((t, i) => `${i + 1}. ${t}`).join("\n")}
+
+Candidate article title: ${input.articleTitle ?? "(untitled)"}
+Candidate article content:
+${input.articleText}
+
+Judge TOPIC RELEVANCE ONLY.
+
+Important:
+- Answer YES if the article addresses the same underlying support issue, even if it is incomplete, too basic, outdated, or does not answer every customer scenario.
+- Answer NO only if the article is about a different support issue.
+- Do NOT use missing steps or incomplete troubleshooting coverage as a reason to answer NO.
+- Completeness is evaluated separately after this relevance check.
+
+Examples:
+- Password reset questions vs a password reset article → YES, even if the article lacks troubleshooting steps.
+- Billing/update-payment questions vs a password reset article → NO.
+- Two-factor authentication questions vs a 2FA setup article → YES.
+- Order tracking questions vs a password reset article → NO.
+
+Respond with EXACTLY two lines:
+Verdict: <YES or NO>
+Reason: <one sentence explaining whether the topics are the same or different>`;
+  const { maskedText } = maskPII(rawPrompt);
+  const { text } = await withRetry(() =>
+    provider.generateText({ prompt: maskedText })
+  );
+
+  const verdictMatch = text.match(/Verdict:\s*(YES|NO)/i);
+  const reasonMatch = text.match(/Reason:\s*(.+)/i);
+
+  return {
+    // Fail closed: an uncertain candidate must not be treated as coverage.
+    isRelevant: verdictMatch
+      ? verdictMatch[1].toUpperCase() === "YES"
+      : false,
+    justification:
+      reasonMatch?.[1]?.trim() ??
+      "Unable to confirm that the candidate article covers this topic.",
+  };
+}
+
 /**
  * Uses the LLM to judge whether a matched article fully answers a
  * topic's representative questions — per scope item #2's second branch.
@@ -83,8 +147,8 @@ export async function checkArticleWeakness(
 ): Promise<WeaknessCheckResult> {
   const provider = createAIProvider();
 
-  const rawPrompt = `A customer support knowledge base article is being evaluated against a 
-topic of frequently asked customer questions.
+  const rawPrompt = `A customer support knowledge base article is being evaluated against
+a topic of frequently asked customer questions.
 
 Topic: ${input.topicSummary}
 
@@ -95,10 +159,29 @@ Existing article title: ${input.articleTitle ?? "(untitled)"}
 Existing article content:
 ${input.articleText}
 
-Does this article FULLY and CLEARLY answer these customer questions? 
+Evaluate COVERAGE COMPLETENESS.
+
+Check every distinct customer question or scenario in the representative excerpts
+against the article.
+
+Rules:
+- Answer YES only if the article clearly provides enough information to resolve
+  every distinct customer question/scenario represented above.
+- Answer NO if at least one distinct customer question/scenario is not addressed
+  by the article.
+- Do not treat an article as complete merely because it covers the general topic.
+- A related article can still be incomplete and therefore Weak.
+- Do not invent coverage that is not present in the article.
+- Judge only from the supplied article content.
+
+Example:
+If most tickets ask how to update a billing address, but one representative ticket
+asks how to update the account email address, an article that explains only billing
+address changes is incomplete. The verdict must be NO.
+
 Respond with EXACTLY two lines:
 Verdict: <YES or NO>
-Reason: <one sentence explaining why>`;
+Reason: <one sentence identifying the missing coverage, or stating that all representative scenarios are covered>`;
 
   const { maskedText } = maskPII(rawPrompt);
   const { text } = await withRetry(() => provider.generateText({ prompt: maskedText }));
@@ -206,7 +289,27 @@ export async function classifyGap(input: ClassifyGapInput): Promise<ClassifyGapR
     [match.articleId]
   );
   const article = articleTextResult.rows[0];
+  const relevanceResult = await checkArticleRelevance({
+  topicSummary: input.topicSummary,
+  representativeTicketExcerpts: input.representativeTicketExcerpts,
+  articleTitle: article.title,
+  articleText: article.clean_text ?? "",
+});
 
+if (!relevanceResult.isRelevant) {
+  const classification: GapClassification = "missing";
+
+  return {
+    classification,
+    relatedGuideArticleId: null,
+    similarityScore: match.similarity,
+    priorityScore: computePriorityScore(
+      classification,
+      input.ticketVolume
+    ),
+    justification: `The nearest published article was not relevant to this topic: ${relevanceResult.justification}`,
+  };
+}
   const weaknessResult = await checkArticleWeakness({
     topicSummary: input.topicSummary,
     representativeTicketExcerpts: input.representativeTicketExcerpts,
