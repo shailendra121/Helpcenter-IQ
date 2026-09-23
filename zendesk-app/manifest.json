@@ -11,23 +11,11 @@
   "location": {
     "support": {
       "nav_bar": {
-        "url": "https://app.helpcenteriq.example/zaf/dashboard",
+        "url": "https://treaty-prostate-branches-trio.trycloudflare.com/zaf/dashboard",
         "flexible": true
       }
     }
   },
   "version": "1.0",
-  "frameworkVersion": "2.0",
-  "oauth": {
-    "client_id": "REPLACE_AFTER_MARKETPLACE_REGISTRATION",
-    "client_secret": "stored server-side only — never committed",
-    "authorize_uri": "https://app.helpcenteriq.example/oauth/authorize",
-    "access_token_uri": "https://app.helpcenteriq.example/oauth/token"
-  },
-  "parameters": [
-    {
-      "name": "token",
-      "type": "oauth"
-    }
-  ]
+  "frameworkVersion": "2.0"
 }

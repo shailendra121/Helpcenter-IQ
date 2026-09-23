@@ -7,6 +7,12 @@ import dashboardRoutes from "./dashboard/routes.js";
 
 const app = express();
 
+// The app runs behind a reverse proxy (for example Cloudflare in
+// development and the production hosting proxy). Trust the first proxy
+// so req.protocol respects X-Forwarded-Proto and HTTPS callback URLs are
+// generated correctly.
+app.set("trust proxy", 1);
+
 const dashboardDistPath = path.resolve(
   __dirname,
   "../../dashboard/dist",

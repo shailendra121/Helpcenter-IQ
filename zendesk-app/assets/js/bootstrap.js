@@ -12,6 +12,5 @@
       app_guid: context.instanceGuid,
     });
 
-    window.location.href = `https://app.helpcenteriq.example/zaf/dashboard?${params.toString()}`;
-  });
+window.location.href = `http://localhost:4000/zaf/dashboard?${params.toString()}`;  });
 })();
