@@ -89,7 +89,17 @@ export async function createDraftArticle(
     client.release();
   }
 }
-
+export interface SaveReviewerEditsInput {
+  suggestedTitle: string;
+  problemSummary: string;
+  stepByStepResolution: string;
+  faq: {
+    question: string;
+    answer: string;
+  }[];
+  relatedKeywords: string[];
+  internalReviewerNotes: string;
+}
 export class InvalidStatusTransitionError extends Error {
   constructor(from: ReviewStatus, to: ReviewStatus) {
     super(`Cannot transition draft article from "${from}" to "${to}"`);
@@ -109,46 +119,125 @@ const ALLOWED_TRANSITIONS: Record<
   approved: [],
   rejected: ["draft"],
 };
+export async function saveReviewerEdits(
+  draftId: number,
+  zendeskAccountId: number,
+  input: SaveReviewerEditsInput
+): Promise<DraftArticleRow | null> {
+  const result = await pool.query<DraftArticleRow>(
+    `UPDATE draft_articles
+     SET reviewer_suggested_title = $1,
+         reviewer_problem_summary = $2,
+         reviewer_step_by_step_resolution = $3,
+         reviewer_faq_json = $4,
+         reviewer_related_keywords = $5,
+         reviewer_internal_notes = $6,
+         reviewer_edited_at = NOW()
+     WHERE id = $7
+       AND zendesk_account_id = $8
+     RETURNING *`,
+    [
+      input.suggestedTitle,
+      input.problemSummary,
+      input.stepByStepResolution,
+      JSON.stringify(input.faq),
+      input.relatedKeywords,
+      input.internalReviewerNotes,
+      draftId,
+      zendeskAccountId,
+    ]
+  );
+
+  return result.rows[0] ?? null;
+}
+
+export class RejectionReasonRequiredError extends Error {
+  constructor() {
+    super("A rejection reason is required when rejecting a draft article");
+    this.name = "RejectionReasonRequiredError";
+  }
+}
+
+export class DraftArticleNotFoundError extends Error {
+  constructor(draftId: number) {
+    super(`No draft article found with id ${draftId}`);
+    this.name = "DraftArticleNotFoundError";
+  }
+}
 
 export async function transitionDraftStatus(
   draftId: number,
-  newStatus: ReviewStatus
+  zendeskAccountId: number,
+  newStatus: ReviewStatus,
+  rejectionReason?: string
 ): Promise<void> {
-  const current = await pool.query<{
-    review_status: ReviewStatus;
-  }>(
-    `SELECT review_status
-     FROM draft_articles
-     WHERE id = $1`,
-    [draftId]
-  );
+  const client = await pool.connect();
 
-  if (current.rows.length === 0) {
-    throw new Error(
-      `No draft article found with id ${draftId}`
+  try {
+    await client.query("BEGIN");
+
+    const current = await client.query<{
+      review_status: ReviewStatus;
+    }>(
+      `SELECT review_status
+       FROM draft_articles
+       WHERE id = $1
+         AND zendesk_account_id = $2
+       FOR UPDATE`,
+      [draftId, zendeskAccountId]
     );
-  }
 
-  const currentStatus = current.rows[0].review_status;
+    if (current.rows.length === 0) {
+      throw new DraftArticleNotFoundError(draftId);
+    }
 
-  if (!ALLOWED_TRANSITIONS[currentStatus].includes(newStatus)) {
-    throw new InvalidStatusTransitionError(
-      currentStatus,
-      newStatus
+    const currentStatus = current.rows[0].review_status;
+
+    if (!ALLOWED_TRANSITIONS[currentStatus].includes(newStatus)) {
+      throw new InvalidStatusTransitionError(
+        currentStatus,
+        newStatus
+      );
+    }
+
+    const trimmedRejectionReason = rejectionReason?.trim();
+
+    if (newStatus === "rejected" && !trimmedRejectionReason) {
+      throw new RejectionReasonRequiredError();
+    }
+
+    await client.query(
+      `UPDATE draft_articles
+       SET review_status = $1,
+           rejection_reason = $2,
+           status_updated_at = NOW()
+       WHERE id = $3
+         AND zendesk_account_id = $4`,
+      [
+        newStatus,
+        newStatus === "rejected"
+          ? trimmedRejectionReason
+          : null,
+        draftId,
+        zendeskAccountId,
+      ]
     );
-  }
 
-  await pool.query(
-    `UPDATE draft_articles
-     SET review_status = $1
-     WHERE id = $2`,
-    [newStatus, draftId]
-  );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export interface DraftArticleRow {
   id: number;
   knowledge_gap_id: number;
+  zendesk_account_id: number;
+
+  // Immutable AI-generated version
   suggested_title: string;
   problem_summary: string | null;
   step_by_step_resolution: string | null;
@@ -158,8 +247,147 @@ export interface DraftArticleRow {
   }[] | null;
   related_keywords: string[] | null;
   internal_reviewer_notes: string | null;
+
+  // Human reviewer revision — never overwrite AI fields above
+  reviewer_suggested_title: string | null;
+  reviewer_problem_summary: string | null;
+  reviewer_step_by_step_resolution: string | null;
+  reviewer_faq_json: {
+    question: string;
+    answer: string;
+  }[] | null;
+  reviewer_related_keywords: string[] | null;
+  reviewer_internal_notes: string | null;
+
+  rejection_reason: string | null;
+  reviewer_edited_at: Date | null;
+  status_updated_at: Date | null;
+
   review_status: ReviewStatus;
   version: number;
+  created_at: Date;
+}
+export interface DraftListRow {
+  id: number;
+  knowledge_gap_id: number;
+  topic_summary: string;
+  suggested_title: string;
+  reviewer_suggested_title: string | null;
+  review_status: ReviewStatus;
+  version: number;
+  created_at: Date;
+  reviewer_edited_at: Date | null;
+  status_updated_at: Date | null;
+}
+export async function listDraftArticles(
+  zendeskAccountId: number
+): Promise<DraftListRow[]> {
+  const result = await pool.query<DraftListRow>(
+    `SELECT
+   d.id,
+   d.knowledge_gap_id,
+   kg.topic_summary,
+   d.suggested_title,
+   d.reviewer_suggested_title,
+   d.review_status,
+   d.version,
+   d.created_at,
+   d.reviewer_edited_at,
+   d.status_updated_at
+ FROM draft_articles d
+ JOIN knowledge_gaps kg
+   ON kg.id = d.knowledge_gap_id
+ WHERE d.zendesk_account_id = $1
+   AND d.version = (
+     SELECT MAX(latest.version)
+     FROM draft_articles latest
+     WHERE latest.knowledge_gap_id = d.knowledge_gap_id
+       AND latest.zendesk_account_id = d.zendesk_account_id
+   )
+ ORDER BY d.created_at DESC, d.id DESC`,
+    [zendeskAccountId]
+  );
+
+  return result.rows;
+}
+export async function getDraftArticleById(
+  draftId: number,
+  zendeskAccountId: number
+): Promise<DraftArticleRow | null> {
+  const result = await pool.query<DraftArticleRow>(
+    `SELECT
+       id,
+       knowledge_gap_id,
+       zendesk_account_id,
+
+       suggested_title,
+       problem_summary,
+       step_by_step_resolution,
+       faq_json,
+       related_keywords,
+       internal_reviewer_notes,
+
+       reviewer_suggested_title,
+       reviewer_problem_summary,
+       reviewer_step_by_step_resolution,
+       reviewer_faq_json,
+       reviewer_related_keywords,
+       reviewer_internal_notes,
+
+       rejection_reason,
+       reviewer_edited_at,
+       status_updated_at,
+
+       review_status,
+       version,
+       created_at
+     FROM draft_articles
+     WHERE id = $1
+       AND zendesk_account_id = $2`,
+    [draftId, zendeskAccountId]
+  );
+
+  return result.rows[0] ?? null;
+}
+export async function getDraftVersionsForGap(
+  knowledgeGapId: number,
+  zendeskAccountId: number
+): Promise<DraftArticleRow[]> {
+  const result = await pool.query<DraftArticleRow>(
+    `SELECT
+       id,
+       knowledge_gap_id,
+       zendesk_account_id,
+
+       suggested_title,
+       problem_summary,
+       step_by_step_resolution,
+       faq_json,
+       related_keywords,
+       internal_reviewer_notes,
+
+       reviewer_suggested_title,
+       reviewer_problem_summary,
+       reviewer_step_by_step_resolution,
+       reviewer_faq_json,
+       reviewer_related_keywords,
+       reviewer_internal_notes,
+
+       rejection_reason,
+       reviewer_edited_at,
+       status_updated_at,
+
+       review_status,
+       version,
+       created_at
+     FROM draft_articles
+     WHERE knowledge_gap_id = $1
+       AND zendesk_account_id = $2
+     ORDER BY version DESC`,
+    [knowledgeGapId, zendeskAccountId]
+  );
+
+  return result.rows;
 }
 
 export async function getLatestDraftForGap(
@@ -178,4 +406,3 @@ export async function getLatestDraftForGap(
 
   return result.rows[0] ?? null;
 }
-
