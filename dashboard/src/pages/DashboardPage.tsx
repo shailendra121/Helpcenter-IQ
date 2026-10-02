@@ -119,7 +119,6 @@ interface DraftListItem {
   title: string;
   ai_title: string;
   status: DraftReviewStatus;
-  version: number;
   generated_at: string;
   reviewer_edited_at: string | null;
   status_updated_at: string | null;
@@ -155,19 +154,12 @@ interface DraftDetail {
   id: number;
   gap_id: number;
   status: DraftReviewStatus;
-  version: number;
   generated_at: string;
   reviewer_edited_at: string | null;
   status_updated_at: string | null;
   rejection_reason: string | null;
   ai_original: DraftContent;
   reviewer_revision: DraftReviewerRevision;
-  versions: Array<{
-    id: number;
-    version: number;
-    status: DraftReviewStatus;
-    generated_at: string;
-  }>;
 }
 
 const classificationLabels: Record<
@@ -248,9 +240,6 @@ export default function DashboardPage() {
   
   const [draftFormDirty, setDraftFormDirty] =
   useState(false);
-  
-  const [pendingVersionId, setPendingVersionId] =
-  useState<number | null>(null);
 
   const [pendingClose, setPendingClose] =
   useState(false);
@@ -427,37 +416,48 @@ export default function DashboardPage() {
         );
       }
 
-      setSelectedDraft(data);
-      setDraftForm({
+setSelectedDraft({
+  ...data,
+  ai_original: {
+    ...data.ai_original,
+    faq: data.ai_original?.faq ?? [],
+    related_keywords:
+      data.ai_original?.related_keywords ?? [],
+  },
+});
+
+setDraftForm({
   suggested_title:
-    data.reviewer_revision.suggested_title ??
-    data.ai_original.suggested_title,
+    data.reviewer_revision?.suggested_title ??
+    data.ai_original?.suggested_title ??
+    "",
 
   problem_summary:
-    data.reviewer_revision.problem_summary ??
-    data.ai_original.problem_summary,
+    data.reviewer_revision?.problem_summary ??
+    data.ai_original?.problem_summary ??
+    "",
 
   step_by_step_resolution:
-    data.reviewer_revision
-      .step_by_step_resolution ??
-    data.ai_original.step_by_step_resolution,
+    data.reviewer_revision?.step_by_step_resolution ??
+    data.ai_original?.step_by_step_resolution ??
+    "",
 
   faq:
-    data.reviewer_revision.faq ??
-    data.ai_original.faq,
+    data.reviewer_revision?.faq ??
+    data.ai_original?.faq ??
+    [],
 
   related_keywords:
-    data.reviewer_revision.related_keywords ??
-    data.ai_original.related_keywords,
+    data.reviewer_revision?.related_keywords ??
+    data.ai_original?.related_keywords ??
+    [],
 
   internal_reviewer_notes:
-    data.reviewer_revision
-      .internal_reviewer_notes ??
-    data.ai_original.internal_reviewer_notes,
+    data.reviewer_revision?.internal_reviewer_notes ??
+    data.ai_original?.internal_reviewer_notes ??
+    "",
 });
 setDraftFormDirty(false);
-setPendingVersionId(null);
-
 setDraftActionMessage("");
     } catch (err) {
       setDraftsError(
@@ -637,7 +637,7 @@ setDraftActionMessage("");
      }
 
      setDraftActionMessage(
-       "New draft version generated successfully.",
+       "Draft regenerated successfully.",
      );
     } catch (err) {
       setDraftActionMessage(
@@ -1029,7 +1029,7 @@ useEffect(() => {
               "Failed to generate draft.",
           );
         }
-
+        await fetchDrafts();
         setDraftMessage(
           `Draft article generated successfully. Draft ID: ${data.id}`,
         );
@@ -1960,7 +1960,6 @@ useEffect(() => {
               "Title",
               "Topic",
               "Status",
-              "Version",
               "Generated",
               "Action",
             ].map((heading) => (
@@ -2011,14 +2010,6 @@ useEffect(() => {
                   padding: "12px 10px",
                 }}
               >
-                v{draft.version}
-              </td>
-
-              <td
-                style={{
-                  padding: "12px 10px",
-                }}
-              >
                 {new Date(
                   draft.generated_at,
                 ).toLocaleString()}
@@ -2045,8 +2036,6 @@ useEffect(() => {
     </div>
   )}
 </section>
-
-{/* Gap Detail */}
 
       {/* Gap Detail */}
       {selectedGap && (
@@ -2416,8 +2405,7 @@ useEffect(() => {
               marginBottom: 0,
             }}
           >
-            Version {selectedDraft.version} ·{" "}
-            {selectedDraft.status}
+            Status: {selectedDraft.status}
           </p>
         </div>
 
@@ -2485,108 +2473,7 @@ useEffect(() => {
     borderRadius: "8px",
   }}
 >
-  <h3
-    style={{
-      marginTop: 0,
-    }}
-  >
-    Version History
-  </h3>
-  {pendingVersionId !== null && (
-    <div
-      style={{
-        marginBottom: "16px",
-        padding: "12px",
-        border: "1px solid #f59e0b",
-        borderRadius: "8px",
-        background: "#fffbeb",
-      }}
-    >
-      <strong>Unsaved changes</strong>
-
-      <p style={{ margin: "8px 0" }}>
-        You have unsaved changes. Discard them and switch versions?
-      </p>
-
-      <div style={{ display: "flex", gap: "8px" }}>
-        <button
-          type="button"
-          onClick={() => {
-            const versionId = pendingVersionId;
-            setPendingVersionId(null);
-            void openDraft(versionId);
-          }}
-        >
-          Discard & Switch
-        </button>
-
-        <button
-          type="button"
-          onClick={() => {
-            setPendingVersionId(null);
-          }}
-        >
-          Keep Editing
-        </button>
-      </div>
-    </div>
-  )}
-
-  {selectedDraft.versions.length === 0 ? (
-    <p
-      style={{
-        color: "#6b7280",
-      }}
-    >
-      No previous versions available.
-    </p>
-  ) : (
-    <ul
-      style={{
-        marginBottom: 0,
-      }}
-    >
-      {selectedDraft.versions.map(
-        (version) => (
-          <li
-            key={version.id}
-            style={{
-              marginBottom: "8px",
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => {
-                if (draftFormDirty) {
-                  setPendingVersionId(version.id);
-                  return;
-                }
-
-                void openDraft(version.id);
-              }}
-              disabled={
-                version.id ===
-                selectedDraft.id
-              }
-            >
-              Version {version.version}
-              {version.id ===
-              selectedDraft.id
-                ? " (Current)"
-                : ""}
-            </button>{" "}
-            — {version.status} —{" "}
-            {new Date(
-              version.generated_at,
-            ).toLocaleString()}
-          </li>
-        ),
-      )}
-    </ul>
-  )}
-</div>
-
-<h3>AI Generated Draft</h3>
+ <h3>AI Generated Draft</h3>
       <h4>Title</h4>
       <p>
         {
@@ -2661,6 +2548,8 @@ useEffect(() => {
           .internal_reviewer_notes ||
           "No reviewer notes."}
       </p>
+
+      </div>
       {draftForm && (
   <>
     <hr
@@ -3134,8 +3023,7 @@ useEffect(() => {
       marginBottom: 0,
     }}
   >
-    Regeneration creates a new version.
-    Previous versions are retained.
+   Regeneration updates the existing draft.
   </p>
 </div>
 

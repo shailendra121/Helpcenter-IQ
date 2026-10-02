@@ -2189,200 +2189,6 @@ it(
 );
 
 it(
-  "protects unsaved reviewer edits before switching draft versions",
-  async () => {
-    const currentDraft = {
-      id: 102,
-      gap_id: 12,
-      status: "draft",
-      version: 2,
-      generated_at: "2026-09-29T08:00:00.000Z",
-      reviewer_edited_at: null,
-      status_updated_at: null,
-      rejection_reason: null,
-      ai_original: {
-        suggested_title: "Reset your password",
-        problem_summary: "Users cannot reset their password.",
-        step_by_step_resolution: "Open settings and reset the password.",
-        faq: [],
-        related_keywords: ["password", "login"],
-        internal_reviewer_notes: "",
-      },
-      reviewer_revision: {
-        suggested_title: null,
-        problem_summary: null,
-        step_by_step_resolution: null,
-        faq: null,
-        related_keywords: null,
-        internal_reviewer_notes: null,
-      },
-      versions: [
-        {
-          id: 101,
-          version: 1,
-          status: "approved",
-          generated_at: "2026-09-28T08:00:00.000Z",
-        },
-        {
-          id: 102,
-          version: 2,
-          status: "draft",
-          generated_at: "2026-09-29T08:00:00.000Z",
-        },
-      ],
-    };
-
-    const oldDraft = {
-      ...currentDraft,
-      id: 101,
-      version: 1,
-      status: "approved",
-      ai_original: {
-        ...currentDraft.ai_original,
-        suggested_title: "Reset your password V1",
-      },
-      versions: currentDraft.versions,
-    };
-
-    vi.mocked(fetch).mockImplementation(
-      async (input: RequestInfo | URL) => {
-        const url = String(input);
-
-        if (url === "/api/dashboard/session") {
-          return jsonResponse({
-            authenticated: true,
-            zendesk_account_id: 1,
-            subdomain: "test",
-            zendesk_url: "https://test.zendesk.com",
-          });
-        }
-
-        if (url === "/api/dashboard/summary") {
-          return jsonResponse({
-            top_missing_articles: [],
-            most_repeated_questions: [],
-            estimated_ticket_volume: 0,
-            articles_needing_updates: 0,
-            potential_deflection: 0,
-       });
-        }
-
-        if (url === "/api/analysis-runs/latest") {
-          return jsonResponse({ run: null });
-        }
-
-        if (url.startsWith("/api/dashboard/gaps?")) {
-          return jsonResponse({ gaps: [] });
-        }
-
-        if (url === "/api/dashboard/drafts") {
-          return jsonResponse({
-            drafts: [
-              {
-                id: 102,
-                gap_id: 12,
-                topic: "Password reset",
-                title: "Reset your password",
-                ai_title: "Reset your password",
-                status: "draft",
-                version: 2,
-                generated_at: "2026-09-29T08:00:00.000Z",
-                reviewer_edited_at: null,
-                status_updated_at: null,
-              },
-            ],
-          });
-        }
-
-        if (url === "/api/dashboard/drafts/102") {
-          return jsonResponse(currentDraft);
-        }
-
-        if (url === "/api/dashboard/drafts/101") {
-          return jsonResponse(oldDraft);
-        }
-
-        return jsonResponse({}, 404);
-      },
-    );
-
-    render(<DashboardPage />);
-
-    const reviewButton =
-      await screen.findByRole("button", {
-        name: "Review",
-      });
-
-    await fireEvent.click(reviewButton);
-
-    const titleInput =
-      await screen.findByDisplayValue(
-        "Reset your password",
-      );
-
-    fireEvent.change(titleInput, {
-      target: {
-        value: "Reset your password UNSAVED VERSION",
-      },
-    });
-
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Version 1",
-      }),
-    );
-
-    expect(
-      await screen.findByText(
-        "You have unsaved changes. Discard them and switch versions?",
-      ),
-    ).toBeInTheDocument();
-
-    expect(
-      screen.getByDisplayValue(
-        "Reset your password UNSAVED VERSION",
-      ),
-    ).toBeInTheDocument();
-
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Keep Editing",
-      }),
-    );
-
-    expect(
-      screen.queryByText(
-        "You have unsaved changes. Discard them and switch versions?",
-      ),
-    ).not.toBeInTheDocument();
-
-    expect(
-      screen.getByDisplayValue(
-        "Reset your password UNSAVED VERSION",
-      ),
-    ).toBeInTheDocument();
-
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Version 1",
-      }),
-    );
-
-    fireEvent.click(
-      await screen.findByRole("button", {
-        name: "Discard & Switch",
-      }),
-    );
-
-    expect(
-      await screen.findByDisplayValue(
-        "Reset your password V1",
-      ),
-    ).toBeInTheDocument();
-  },
-);
-
-it(
   "requires a rejection reason before rejecting an in-review draft",
   async () => {
     const defaultFetch =
@@ -2931,7 +2737,7 @@ it(
 );
 
 it(
-  "regenerates a draft and opens the new version",
+  "regenerates a draft and reloads the existing draft",
   async () => {
     const defaultFetch =
       mockFetch.getMockImplementation();
@@ -2941,7 +2747,7 @@ it(
         "Default fetch mock is not installed.",
       );
     }
-
+    let draftRegenerated = false;
     mockFetch.mockImplementation(
       (
         input: RequestInfo | URL,
@@ -2976,13 +2782,14 @@ it(
             "/api/dashboard/drafts/101/regenerate" &&
           init?.method === "POST"
         ) {
+          draftRegenerated = true;
           return Promise.resolve(
             jsonResponse(
               {
-                draft_id: 102,
+                draft_id: 101,
                 gap_id: 12,
               },
-              201,
+              200,
             ),
           );
         }
@@ -2991,12 +2798,49 @@ it(
           url === "/api/dashboard/drafts/101" &&
           !init?.method
         ) {
+          if (draftRegenerated) {
+  return Promise.resolve(
+    jsonResponse({
+      id: 101,
+      gap_id: 12,
+      status: "draft",
+      generated_at:
+        "2026-09-25T11:00:00.000Z",
+      reviewer_edited_at: null,
+      status_updated_at: null,
+      rejection_reason: null,
+
+      ai_original: {
+        suggested_title:
+          "Improved Password Reset Guide",
+        problem_summary:
+          "Regenerated password reset guidance.",
+        step_by_step_resolution:
+          "Updated resolution steps.",
+        faq: [],
+        related_keywords: [
+          "password",
+          "reset",
+        ],
+        internal_reviewer_notes: "",
+      },
+
+      reviewer_revision: {
+        suggested_title: null,
+        problem_summary: null,
+        step_by_step_resolution: null,
+        faq: null,
+        related_keywords: null,
+        internal_reviewer_notes: null,
+      },
+    }),
+  );
+}
           return Promise.resolve(
             jsonResponse({
               id: 101,
               gap_id: 12,
               status: "draft",
-              version: 1,
               generated_at:
                 "2026-09-25T10:00:00.000Z",
               reviewer_edited_at: null,
@@ -3023,81 +2867,10 @@ it(
                 related_keywords: null,
                 internal_reviewer_notes: null,
               },
-
-              versions: [
-                {
-                  id: 101,
-                  version: 1,
-                  status: "draft",
-                  generated_at:
-                    "2026-09-25T10:00:00.000Z",
-                },
-              ],
             }),
           );
         }
-
-        if (
-          url === "/api/dashboard/drafts/102" &&
-          !init?.method
-        ) {
-          return Promise.resolve(
-            jsonResponse({
-              id: 102,
-              gap_id: 12,
-              status: "draft",
-              version: 2,
-              generated_at:
-                "2026-09-25T11:00:00.000Z",
-              reviewer_edited_at: null,
-              status_updated_at: null,
-              rejection_reason: null,
-
-              ai_original: {
-                suggested_title:
-                  "Improved Password Reset Guide",
-                problem_summary:
-                  "Regenerated password reset guidance.",
-                step_by_step_resolution:
-                  "Updated resolution steps.",
-                faq: [],
-                related_keywords: [
-                  "password",
-                  "reset",
-                ],
-                internal_reviewer_notes: "",
-              },
-
-              reviewer_revision: {
-                suggested_title: null,
-                problem_summary: null,
-                step_by_step_resolution: null,
-                faq: null,
-                related_keywords: null,
-                internal_reviewer_notes: null,
-              },
-
-              versions: [
-                {
-                  id: 102,
-                  version: 2,
-                  status: "draft",
-                  generated_at:
-                    "2026-09-25T11:00:00.000Z",
-                },
-                {
-                  id: 101,
-                  version: 1,
-                  status: "draft",
-                  generated_at:
-                    "2026-09-25T10:00:00.000Z",
-                },
-              ],
-            }),
-          );
-        }
-
-        return defaultFetch(input, init);
+     return defaultFetch(input, init);
       },
     );
 
@@ -3135,7 +2908,7 @@ it(
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith(
-        "/api/dashboard/drafts/102",
+        "/api/dashboard/drafts/101",
         {
           credentials: "include",
         },
@@ -3151,17 +2924,19 @@ it(
      ).length,
    ).toBeGreaterThan(0);
 
-    expect(
-      screen.getByRole("button", {
-        name: "Version 2 (Current)",
-      }),
-    ).toBeDisabled();
+expect(
+  (
+    await screen.findAllByText(
+      "Improved Password Reset Guide",
+    )
+  ).length,
+).toBeGreaterThan(0);
 
-    expect(
-      screen.getByRole("button", {
-        name: "Version 1",
-      }),
-    ).toBeEnabled();
+expect(
+  screen.getByDisplayValue(
+    "Improved Password Reset Guide",
+  ),
+).toBeInTheDocument();
   },
 );
 it(
@@ -3209,7 +2984,6 @@ it(
                   ai_title:
                     "Reset your password",
                   status: "in_review",
-                  version: 1,
                   generated_at:
                     "2026-09-25T10:00:00.000Z",
                   reviewer_edited_at:
@@ -3230,7 +3004,6 @@ it(
               id: 101,
               gap_id: 12,
               status: "in_review",
-              version: 1,
               generated_at:
                 "2026-09-25T10:00:00.000Z",
               reviewer_edited_at:
@@ -3274,16 +3047,6 @@ it(
                 internal_reviewer_notes:
                   "Reviewed by knowledge manager.",
               },
-
-              versions: [
-                {
-                  id: 101,
-                  version: 1,
-                  status: "in_review",
-                  generated_at:
-                    "2026-09-25T10:00:00.000Z",
-                },
-              ],
             }),
           );
         }
@@ -3382,7 +3145,6 @@ it(
                   ai_title:
                     "Reset your password",
                   status: "approved",
-                  version: 1,
                   generated_at:
                     "2026-09-25T10:00:00.000Z",
                   reviewer_edited_at:
@@ -3404,7 +3166,6 @@ it(
               id: 101,
               gap_id: 12,
               status: "approved",
-              version: 1,
               generated_at:
                 "2026-09-25T10:00:00.000Z",
               reviewer_edited_at:
@@ -3449,16 +3210,6 @@ it(
                 internal_reviewer_notes:
                   "Reviewed by knowledge manager.",
               },
-
-              versions: [
-                {
-                  id: 101,
-                  version: 1,
-                  status: "approved",
-                  generated_at:
-                    "2026-09-25T10:00:00.000Z",
-                },
-              ],
             }),
           );
         }

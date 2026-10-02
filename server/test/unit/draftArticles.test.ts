@@ -186,16 +186,14 @@ describe("transitionDraftStatus — status lifecycle enforcement", () => {
     expect(mockClientQuery).toHaveBeenCalledWith("ROLLBACK");
     expect(mockRelease).toHaveBeenCalledOnce();
   });
-  it("creates the next draft version without replacing the previous version", async () => {
+ it("updates the existing draft instead of creating a new version", async () => {
   mockClientQuery
     .mockResolvedValueOnce({ rows: [] }) // BEGIN
     .mockResolvedValueOnce({ rows: [] }) // advisory lock
     .mockResolvedValueOnce({
-      rows: [{ max_version: 1 }],
-    }) // existing version
-    .mockResolvedValueOnce({
-      rows: [{ id: 502 }],
-    }) // INSERT new version
+      rows: [{ id: 501 }],
+    }) // existing draft
+    .mockResolvedValueOnce({ rows: [] }) // UPDATE existing draft
     .mockResolvedValueOnce({ rows: [] }); // COMMIT
 
   const draftId = await createDraftArticle({
@@ -215,49 +213,45 @@ describe("transitionDraftStatus — status lifecycle enforcement", () => {
     aiModelUsed: "gemini-test",
   });
 
-  expect(draftId).toBe(502);
+  // Same existing draft is returned.
+  expect(draftId).toBe(501);
 
-  // Existing highest version is read for this gap.
+  // Existing draft is found within the same Zendesk account.
   expect(mockClientQuery).toHaveBeenNthCalledWith(
     3,
-    expect.stringContaining("SELECT MAX(version)"),
-    [10]
+    expect.stringContaining("FROM draft_articles"),
+    [10, 100]
   );
 
-  // Regeneration inserts a new row.
+  // Regeneration updates the same row.
   expect(mockClientQuery).toHaveBeenNthCalledWith(
     4,
-    expect.stringContaining("INSERT INTO draft_articles"),
-    expect.any(Array)
+    expect.stringContaining("UPDATE draft_articles"),
+    expect.arrayContaining([501, 100])
   );
 
-  const insertParams = mockClientQuery.mock.calls[3][1];
-
-  // MAX(version) was 1, therefore new version must be 2.
-  expect(insertParams[insertParams.length - 1]).toBe(2);
-
-  // Previous versions must not be overwritten or deleted.
   const executedSql = mockClientQuery.mock.calls
     .map(([sql]) => String(sql))
     .join("\n");
 
-  expect(executedSql).not.toMatch(/UPDATE\s+draft_articles/i);
-  expect(executedSql).not.toMatch(/DELETE\s+FROM\s+draft_articles/i);
+  // No second draft/version is inserted.
+  expect(executedSql).not.toMatch(
+    /INSERT\s+INTO\s+draft_articles/i
+  );
 
   expect(mockClientQuery).toHaveBeenCalledWith("COMMIT");
   expect(mockRelease).toHaveBeenCalledOnce();
 });
-it("lists only the latest draft version for each knowledge gap", async () => {
+it("lists draft articles without version filtering", async () => {
   mockPoolQuery.mockResolvedValueOnce({
     rows: [
       {
-        id: 502,
+        id: 501,
         knowledge_gap_id: 10,
         topic_summary: "Password reset",
-        suggested_title: "Updated password reset guide",
+        suggested_title: "Password reset guide",
         reviewer_suggested_title: null,
         review_status: "draft",
-        version: 2,
         created_at: new Date(),
         reviewer_edited_at: null,
         status_updated_at: null,
@@ -268,23 +262,20 @@ it("lists only the latest draft version for each knowledge gap", async () => {
   const drafts = await listDraftArticles(100);
 
   expect(drafts).toHaveLength(1);
-  expect(drafts[0].version).toBe(2);
+  expect(drafts[0].id).toBe(501);
+  expect(drafts[0].knowledge_gap_id).toBe(10);
 
   expect(mockPoolQuery).toHaveBeenCalledWith(
     expect.stringContaining(
-      "SELECT MAX(latest.version)",
+      "WHERE d.zendesk_account_id = $1"
     ),
-    [100],
+    [100]
   );
 
   const sql = String(mockPoolQuery.mock.calls[0][0]);
 
-  expect(sql).toContain(
-    "latest.knowledge_gap_id = d.knowledge_gap_id",
-  );
-
-  expect(sql).toContain(
-    "latest.zendesk_account_id = d.zendesk_account_id",
-  );
+  expect(sql).not.toContain("MAX(");
+  expect(sql).not.toContain("latest.version");
+  expect(sql).not.toContain("d.version");
 });
 });

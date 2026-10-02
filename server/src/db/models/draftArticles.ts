@@ -15,14 +15,14 @@ export interface CreateDraftArticleInput {
 }
 
 /**
- * Creates a new draft article version.
+ * Creates or refreshes the single draft article for a knowledge gap.
  *
- * Regeneration creates a new row rather than updating the previous draft.
- * Version calculation and insertion are protected by a transaction-level
- * PostgreSQL advisory lock keyed by knowledgeGapId.
+ * Draft articles are not versioned. If a draft already exists for the
+ * knowledge gap, regeneration updates that same draft instead of creating
+ * another row.
  *
- * This prevents two concurrent generations for the same knowledge gap
- * from calculating the same next version number.
+ * The transaction-level advisory lock prevents concurrent generation
+ * requests from creating duplicate drafts for the same knowledge gap.
  */
 export async function createDraftArticle(
   input: CreateDraftArticleInput
@@ -32,38 +32,58 @@ export async function createDraftArticle(
   try {
     await client.query("BEGIN");
 
-    /**
-     * Serialize draft creation for this specific knowledge gap.
-     *
-     * The first argument is a namespace so this advisory lock does not
-     * accidentally collide with unrelated advisory locks elsewhere.
-     *
-     * Because this is a transaction-level lock, PostgreSQL automatically
-     * releases it when COMMIT or ROLLBACK occurs.
-     */
     await client.query(
       `SELECT pg_advisory_xact_lock($1, $2)`,
       [13, input.knowledgeGapId]
     );
 
-    const versionResult = await client.query<{
-      max_version: number | null;
-    }>(
-      `SELECT MAX(version) AS max_version
+    const existing = await client.query<{ id: number }>(
+      `SELECT id
        FROM draft_articles
-       WHERE knowledge_gap_id = $1`,
-      [input.knowledgeGapId]
+       WHERE knowledge_gap_id = $1
+         AND zendesk_account_id = $2
+       LIMIT 1
+       FOR UPDATE`,
+      [input.knowledgeGapId, input.zendeskAccountId]
     );
 
-    const nextVersion =
-      (versionResult.rows[0].max_version ?? 0) + 1;
+    if (existing.rows.length > 0) {
+      const draftId = existing.rows[0].id;
+
+      await client.query(
+        `UPDATE draft_articles
+         SET suggested_title = $1,
+             problem_summary = $2,
+             step_by_step_resolution = $3,
+             faq_json = $4,
+             related_keywords = $5,
+             internal_reviewer_notes = $6,
+             ai_model_used = $7
+         WHERE id = $8
+           AND zendesk_account_id = $9`,
+        [
+          input.suggestedTitle,
+          input.problemSummary,
+          input.stepByStepResolution,
+          JSON.stringify(input.faq),
+          input.relatedKeywords,
+          input.internalReviewerNotes,
+          input.aiModelUsed,
+          draftId,
+          input.zendeskAccountId,
+        ]
+      );
+
+      await client.query("COMMIT");
+      return draftId;
+    }
 
     const result = await client.query<{ id: number }>(
       `INSERT INTO draft_articles
          (knowledge_gap_id, zendesk_account_id, suggested_title, problem_summary,
           step_by_step_resolution, faq_json, related_keywords,
           internal_reviewer_notes, review_status, ai_model_used, version)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'draft', $9, $10)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'draft', $9, 1)
        RETURNING id`,
       [
         input.knowledgeGapId,
@@ -75,7 +95,6 @@ export async function createDraftArticle(
         input.relatedKeywords,
         input.internalReviewerNotes,
         input.aiModelUsed,
-        nextVersion,
       ]
     );
 
@@ -89,6 +108,7 @@ export async function createDraftArticle(
     client.release();
   }
 }
+
 export interface SaveReviewerEditsInput {
   suggestedTitle: string;
   problemSummary: string;
@@ -237,7 +257,7 @@ export interface DraftArticleRow {
   knowledge_gap_id: number;
   zendesk_account_id: number;
 
-  // Immutable AI-generated version
+  // AI-generated draft content
   suggested_title: string;
   problem_summary: string | null;
   step_by_step_resolution: string | null;
@@ -264,7 +284,6 @@ export interface DraftArticleRow {
   status_updated_at: Date | null;
 
   review_status: ReviewStatus;
-  version: number;
   created_at: Date;
 }
 export interface DraftListRow {
@@ -274,7 +293,6 @@ export interface DraftListRow {
   suggested_title: string;
   reviewer_suggested_title: string | null;
   review_status: ReviewStatus;
-  version: number;
   created_at: Date;
   reviewer_edited_at: Date | null;
   status_updated_at: Date | null;
@@ -290,7 +308,6 @@ export async function listDraftArticles(
    d.suggested_title,
    d.reviewer_suggested_title,
    d.review_status,
-   d.version,
    d.created_at,
    d.reviewer_edited_at,
    d.status_updated_at
@@ -298,18 +315,53 @@ export async function listDraftArticles(
  JOIN knowledge_gaps kg
    ON kg.id = d.knowledge_gap_id
  WHERE d.zendesk_account_id = $1
-   AND d.version = (
-     SELECT MAX(latest.version)
-     FROM draft_articles latest
-     WHERE latest.knowledge_gap_id = d.knowledge_gap_id
-       AND latest.zendesk_account_id = d.zendesk_account_id
-   )
- ORDER BY d.created_at DESC, d.id DESC`,
+    ORDER BY d.created_at DESC, d.id DESC`,
     [zendeskAccountId]
   );
 
   return result.rows;
 }
+/**
+ * Finds the single draft article for a knowledge gap within
+ * the authenticated Zendesk account.
+ */
+export async function getDraftArticleForGap(
+  knowledgeGapId: number,
+  zendeskAccountId: number
+): Promise<DraftArticleRow | null> {
+  const result = await pool.query<DraftArticleRow>(
+    `SELECT
+       id,
+       knowledge_gap_id,
+       zendesk_account_id,
+       suggested_title,
+       problem_summary,
+       step_by_step_resolution,
+       faq_json,
+       related_keywords,
+       internal_reviewer_notes,
+       reviewer_suggested_title,
+       reviewer_problem_summary,
+       reviewer_step_by_step_resolution,
+       reviewer_faq_json,
+       reviewer_related_keywords,
+       reviewer_internal_notes,
+       rejection_reason,
+       reviewer_edited_at,
+       status_updated_at,
+       review_status,
+       ai_model_used,
+       created_at
+     FROM draft_articles
+     WHERE knowledge_gap_id = $1
+       AND zendesk_account_id = $2
+     LIMIT 1`,
+    [knowledgeGapId, zendeskAccountId]
+  );
+
+  return result.rows[0] ?? null;
+}
+
 export async function getDraftArticleById(
   draftId: number,
   zendeskAccountId: number
@@ -339,69 +391,12 @@ export async function getDraftArticleById(
        status_updated_at,
 
        review_status,
-       version,
        created_at
      FROM draft_articles
      WHERE id = $1
        AND zendesk_account_id = $2`,
     [draftId, zendeskAccountId]
-  );
 
-  return result.rows[0] ?? null;
-}
-export async function getDraftVersionsForGap(
-  knowledgeGapId: number,
-  zendeskAccountId: number
-): Promise<DraftArticleRow[]> {
-  const result = await pool.query<DraftArticleRow>(
-    `SELECT
-       id,
-       knowledge_gap_id,
-       zendesk_account_id,
-
-       suggested_title,
-       problem_summary,
-       step_by_step_resolution,
-       faq_json,
-       related_keywords,
-       internal_reviewer_notes,
-
-       reviewer_suggested_title,
-       reviewer_problem_summary,
-       reviewer_step_by_step_resolution,
-       reviewer_faq_json,
-       reviewer_related_keywords,
-       reviewer_internal_notes,
-
-       rejection_reason,
-       reviewer_edited_at,
-       status_updated_at,
-
-       review_status,
-       version,
-       created_at
-     FROM draft_articles
-     WHERE knowledge_gap_id = $1
-       AND zendesk_account_id = $2
-     ORDER BY version DESC`,
-    [knowledgeGapId, zendeskAccountId]
-  );
-
-  return result.rows;
-}
-
-export async function getLatestDraftForGap(
-  gapId: number
-): Promise<DraftArticleRow | null> {
-  const result = await pool.query<DraftArticleRow>(
-    `SELECT id, knowledge_gap_id, suggested_title, problem_summary,
-            step_by_step_resolution, faq_json, related_keywords,
-            internal_reviewer_notes, review_status, version
-     FROM draft_articles
-     WHERE knowledge_gap_id = $1
-     ORDER BY version DESC
-     LIMIT 1`,
-    [gapId]
   );
 
   return result.rows[0] ?? null;

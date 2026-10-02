@@ -12,9 +12,9 @@ import {
   DraftArticleNotFoundError,
   InvalidStatusTransitionError,
   RejectionReasonRequiredError,
-  getDraftArticleById,
-  getDraftVersionsForGap,
   listDraftArticles,
+  getDraftArticleForGap,
+  getDraftArticleById,
   saveReviewerEdits,
   transitionDraftStatus,
   type ReviewStatus,
@@ -629,13 +629,24 @@ router.post("/gaps/:id/drafts", requireTrustedOrigin, async (rawReq, res) => {
       });
     }
 
-    const accountId = req.zafSession.zendeskAccountId;
+        const accountId = req.zafSession.zendeskAccountId;
+
+    const existingDraft = await getDraftArticleForGap(
+      gapId,
+      accountId,
+    );
+
+    if (existingDraft) {
+      return res.status(200).json({
+        id: existingDraft.id,
+        gap_id: gapId,
+      });
+    }
 
     const result = await generateDraftForGap(
       accountId,
       gapId,
     );
-
     return res.status(201).json({
       id: result.draftId,
       gap_id: gapId,
@@ -668,7 +679,7 @@ if (
 /**
  * GET /api/dashboard/drafts
  *
- * Lists all draft article versions belonging to the authenticated
+ * Lists draft articles belonging to the authenticated
  * Zendesk account.
  */
 router.get("/drafts", async (rawReq, res) => {
@@ -689,7 +700,6 @@ router.get("/drafts", async (rawReq, res) => {
           draft.suggested_title,
         ai_title: draft.suggested_title,
         status: draft.review_status,
-        version: draft.version,
         generated_at: draft.created_at,
         reviewer_edited_at: draft.reviewer_edited_at,
         status_updated_at: draft.status_updated_at,
@@ -709,8 +719,8 @@ router.get("/drafts", async (rawReq, res) => {
 /**
  * GET /api/dashboard/drafts/:id
  *
- * Returns one draft, its immutable AI-generated content,
- * reviewer revision, and version history.
+ * Returns one draft, its AI-generated content
+ * and the reviewer's persisted revision.
  */
 router.get("/drafts/:id", async (rawReq, res) => {
   const req = rawReq as unknown as AuthenticatedZafRequest;
@@ -736,17 +746,10 @@ router.get("/drafts/:id", async (rawReq, res) => {
         error: `Draft article ${draftId} not found`,
       });
     }
-
-    const versions = await getDraftVersionsForGap(
-      draft.knowledge_gap_id,
-      accountId,
-    );
-
     return res.json({
       id: draft.id,
       gap_id: draft.knowledge_gap_id,
       status: draft.review_status,
-      version: draft.version,
       generated_at: draft.created_at,
       reviewer_edited_at: draft.reviewer_edited_at,
       status_updated_at: draft.status_updated_at,
@@ -776,13 +779,6 @@ router.get("/drafts/:id", async (rawReq, res) => {
         internal_reviewer_notes:
           draft.reviewer_internal_notes,
       },
-
-      versions: versions.map((version) => ({
-        id: version.id,
-        version: version.version,
-        status: version.review_status,
-        generated_at: version.created_at,
-      })),
     });
   } catch (error) {
     console.error(
@@ -893,7 +889,6 @@ router.put(
         id: updated.id,
         gap_id: updated.knowledge_gap_id,
         status: updated.review_status,
-        version: updated.version,
         reviewer_edited_at:
           updated.reviewer_edited_at,
 
@@ -1035,7 +1030,7 @@ router.post(
  * The selected draft is resolved within the authenticated Zendesk
  * account, and its knowledge gap is used for generation.
  *
- * Existing draft versions are preserved.
+ * Regeneration refreshes the same draft; no draft version is created.
  */
 router.post(
   "/drafts/:id/regenerate",
@@ -1075,10 +1070,10 @@ router.post(
           existingDraft.knowledge_gap_id,
      );
 
-      return res.status(201).json({
+      return res.status(200).json({
         draft_id: regeneratedDraft.draftId,
         gap_id: existingDraft.knowledge_gap_id,
-  });
+     });
     } catch (error) {
       if (error instanceof KnowledgeGapNotFoundError) {
         return res.status(404).json({

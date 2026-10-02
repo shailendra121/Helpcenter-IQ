@@ -15,14 +15,14 @@ import {
 const {
   mockListDraftArticles,
   mockGetDraftArticleById,
-  mockGetDraftVersionsForGap,
+  mockGetDraftArticleForGap,
   mockSaveReviewerEdits,
   mockTransitionDraftStatus,
   mockGenerateDraftForGap,
 } = vi.hoisted(() => ({
   mockListDraftArticles: vi.fn(),
   mockGetDraftArticleById: vi.fn(),
-  mockGetDraftVersionsForGap: vi.fn(),
+  mockGetDraftArticleForGap: vi.fn(),
   mockSaveReviewerEdits: vi.fn(),
   mockTransitionDraftStatus: vi.fn(),
   mockGenerateDraftForGap: vi.fn(),
@@ -40,7 +40,7 @@ vi.mock(
       ...actual,
       listDraftArticles: mockListDraftArticles,
       getDraftArticleById: mockGetDraftArticleById,
-      getDraftVersionsForGap: mockGetDraftVersionsForGap,
+      getDraftArticleForGap: mockGetDraftArticleForGap,
       saveReviewerEdits: mockSaveReviewerEdits,
       transitionDraftStatus: mockTransitionDraftStatus,
     };
@@ -97,7 +97,6 @@ describe("HCIQ-16 dashboard draft review API", () => {
         reviewer_suggested_title:
           "Reset your account password",
         review_status: "in_review",
-        version: 2,
         created_at: new Date(
           "2026-09-24T06:00:00.000Z",
         ),
@@ -135,143 +134,106 @@ describe("HCIQ-16 dashboard draft review API", () => {
       title: "Reset your account password",
       ai_title: "How to reset your password",
       status: "in_review",
-      version: 2,
     });
   });
 
-  it("returns AI original, reviewer revision, and version history for one draft", async () => {
-    mockGetDraftArticleById.mockResolvedValueOnce({
-      id: 500,
-      knowledge_gap_id: 10,
-      zendesk_account_id: 1,
+it("returns AI original and reviewer revision for one draft", async () => {
+  mockGetDraftArticleById.mockResolvedValueOnce({
+    id: 500,
+    knowledge_gap_id: 10,
+    zendesk_account_id: 1,
 
-      suggested_title: "AI title",
-      problem_summary: "AI problem",
-      step_by_step_resolution: "AI steps",
-      faq_json: [
-        {
-          question: "AI question?",
-          answer: "AI answer",
-        },
-      ],
-      related_keywords: ["password", "reset"],
-      internal_reviewer_notes: "AI reviewer notes",
-
-      reviewer_suggested_title: "Human title",
-      reviewer_problem_summary: "Human problem",
-      reviewer_step_by_step_resolution: "Human steps",
-      reviewer_faq_json: [
-        {
-          question: "Human question?",
-          answer: "Human answer",
-        },
-      ],
-      reviewer_related_keywords: [
-        "password",
-        "account",
-      ],
-      reviewer_internal_notes: "Human notes",
-
-      rejection_reason: null,
-      reviewer_edited_at: new Date(
-        "2026-09-24T06:30:00.000Z",
-      ),
-      status_updated_at: new Date(
-        "2026-09-24T06:35:00.000Z",
-      ),
-
-      review_status: "in_review",
-      version: 2,
-      created_at: new Date(
-        "2026-09-24T06:00:00.000Z",
-      ),
-    });
-
-    mockGetDraftVersionsForGap.mockResolvedValueOnce([
+    suggested_title: "AI title",
+    problem_summary: "AI problem",
+    step_by_step_resolution: "AI steps",
+    faq_json: [
       {
-        id: 500,
-        version: 2,
-        review_status: "in_review",
-        created_at: new Date(
-          "2026-09-24T06:00:00.000Z",
-        ),
+        question: "AI question?",
+        answer: "AI answer",
       },
+    ],
+    related_keywords: ["password", "reset"],
+    internal_reviewer_notes: "AI reviewer notes",
+
+    reviewer_suggested_title: "Human title",
+    reviewer_problem_summary: "Human problem",
+    reviewer_step_by_step_resolution: "Human steps",
+    reviewer_faq_json: [
       {
-        id: 450,
-        version: 1,
-        review_status: "rejected",
-        created_at: new Date(
-          "2026-09-23T06:00:00.000Z",
-        ),
+        question: "Human question?",
+        answer: "Human answer",
       },
-    ]);
+    ],
+    reviewer_related_keywords: ["password", "account"],
+    reviewer_internal_notes: "Human notes",
 
-    const sessionToken = createZafSessionToken(
-      1,
-      "d3v-astonous",
-    );
+    rejection_reason: null,
+    reviewer_edited_at: new Date(
+      "2026-09-24T06:30:00.000Z"
+    ),
+    status_updated_at: new Date(
+      "2026-09-24T06:35:00.000Z"
+    ),
 
-    const response = await request(app)
-      .get("/api/dashboard/drafts/500")
-      .set(
-        "Cookie",
-        `hciq_zaf_session=${sessionToken}`,
-      );
-
-    expect(response.status).toBe(200);
-
-    expect(mockGetDraftArticleById).toHaveBeenCalledWith(
-      500,
-      1,
-    );
-
-    expect(
-      mockGetDraftVersionsForGap,
-    ).toHaveBeenCalledWith(10, 1);
-
-    expect(response.body.ai_original).toEqual({
-      suggested_title: "AI title",
-      problem_summary: "AI problem",
-      step_by_step_resolution: "AI steps",
-      faq: [
-        {
-          question: "AI question?",
-          answer: "AI answer",
-        },
-      ],
-      related_keywords: ["password", "reset"],
-      internal_reviewer_notes: "AI reviewer notes",
-    });
-
-    expect(response.body.reviewer_revision).toEqual({
-      suggested_title: "Human title",
-      problem_summary: "Human problem",
-      step_by_step_resolution: "Human steps",
-      faq: [
-        {
-          question: "Human question?",
-          answer: "Human answer",
-        },
-      ],
-      related_keywords: ["password", "account"],
-      internal_reviewer_notes: "Human notes",
-    });
-
-    expect(response.body.versions).toEqual([
-      expect.objectContaining({
-        id: 500,
-        version: 2,
-        status: "in_review",
-      }),
-      expect.objectContaining({
-        id: 450,
-        version: 1,
-        status: "rejected",
-      }),
-    ]);
+    review_status: "in_review",
+    created_at: new Date(
+      "2026-09-24T06:00:00.000Z"
+    ),
   });
 
-  it("rejects a non-integer draft id", async () => {
+  const sessionToken = createZafSessionToken(
+    1,
+    "d3v-astonous"
+  );
+
+  const response = await request(app)
+    .get("/api/dashboard/drafts/500")
+    .set(
+      "Cookie",
+      `hciq_zaf_session=${sessionToken}`
+    );
+
+  expect(response.status).toBe(200);
+
+  expect(mockGetDraftArticleById).toHaveBeenCalledWith(
+    500,
+    1
+  );
+
+  expect(response.body.ai_original).toEqual({
+    suggested_title: "AI title",
+    problem_summary: "AI problem",
+    step_by_step_resolution: "AI steps",
+    faq: [
+      {
+        question: "AI question?",
+        answer: "AI answer",
+      },
+    ],
+    related_keywords: ["password", "reset"],
+    internal_reviewer_notes: "AI reviewer notes",
+  });
+
+  expect(response.body.reviewer_revision).toEqual({
+    suggested_title: "Human title",
+    problem_summary: "Human problem",
+    step_by_step_resolution: "Human steps",
+    faq: [
+      {
+        question: "Human question?",
+        answer: "Human answer",
+      },
+    ],
+    related_keywords: ["password", "account"],
+    internal_reviewer_notes: "Human notes",
+  });
+
+  // Drafts have no version history.
+  expect(response.body).not.toHaveProperty("version");
+  expect(response.body).not.toHaveProperty("versions");
+});  
+      
+it("rejects a non-integer draft id", async () => {
     const sessionToken = createZafSessionToken(
       1,
       "d3v-astonous",
@@ -318,10 +280,6 @@ describe("HCIQ-16 dashboard draft review API", () => {
       999,
       1,
     );
-
-    expect(
-      mockGetDraftVersionsForGap,
-    ).not.toHaveBeenCalled();
   });
 
   it("returns 500 when draft listing fails unexpectedly", async () => {
@@ -467,7 +425,6 @@ it("saves reviewer edits separately for the authenticated account", async () => 
     status_updated_at: null,
 
     review_status: "draft",
-    version: 1,
     created_at: new Date(
       "2026-09-24T06:00:00.000Z",
     ),
@@ -801,6 +758,7 @@ it("returns 404 when changing status of a draft outside the authenticated accoun
     undefined,
   );
 });
+
 it("regenerates a draft using its account-scoped knowledge gap", async () => {
   mockGetDraftArticleById.mockResolvedValueOnce({
     id: 500,
@@ -822,12 +780,11 @@ it("regenerates a draft using its account-scoped knowledge gap", async () => {
     reviewer_edited_at: null,
     status_updated_at: null,
     review_status: "draft",
-    version: 1,
     created_at: new Date("2026-09-24T06:00:00.000Z"),
   });
 
   mockGenerateDraftForGap.mockResolvedValueOnce({
-    draftId: 501,
+    draftId: 500,
   });
 
   const sessionToken = createZafSessionToken(
@@ -844,7 +801,7 @@ it("regenerates a draft using its account-scoped knowledge gap", async () => {
     .set("Origin", "https://helpcenteriq.test")
     .send();
 
-  expect(response.status).toBe(201);
+  expect(response.status).toBe(200);
 
   expect(mockGetDraftArticleById).toHaveBeenCalledWith(
     500,
@@ -857,7 +814,7 @@ it("regenerates a draft using its account-scoped knowledge gap", async () => {
   );
 
   expect(response.body).toEqual({
-    draft_id: 501,
+    draft_id: 500,
     gap_id: 10,
   });
 });
@@ -913,5 +870,40 @@ it("rejects draft regeneration when Origin is missing", async () => {
 
   expect(mockGetDraftArticleById).not.toHaveBeenCalled();
   expect(mockGenerateDraftForGap).not.toHaveBeenCalled();
+});
+it("returns the existing draft instead of generating another draft for the same gap", async () => {
+  mockGetDraftArticleForGap.mockResolvedValueOnce({
+    id: 500,
+    knowledge_gap_id: 10,
+    zendesk_account_id: 1,
+  });
+
+  const sessionToken = createZafSessionToken(
+    1,
+    "d3v-astonous"
+  );
+
+  const response = await request(app)
+    .post("/api/dashboard/gaps/10/drafts")
+    .set(
+      "Cookie",
+      `hciq_zaf_session=${sessionToken}`
+    )
+    .set("Origin", "https://helpcenteriq.test")
+    .send();
+
+  expect(response.status).toBe(200);
+
+  expect(mockGetDraftArticleForGap).toHaveBeenCalledWith(
+    10,
+    1
+  );
+
+  expect(mockGenerateDraftForGap).not.toHaveBeenCalled();
+
+  expect(response.body).toEqual({
+    id: 500,
+    gap_id: 10,
+  });
 });
 });
