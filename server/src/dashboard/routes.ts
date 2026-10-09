@@ -8,7 +8,18 @@ import {
   KnowledgeGapMissingClusterError,
   KnowledgeGapNotFoundError,
 } from "../drafts/runDraftGeneration.js";
-
+import {
+  ApprovedDraftModificationError,
+  DraftArticleNotFoundError,
+  InvalidStatusTransitionError,
+  RejectionReasonRequiredError,
+  listDraftArticles,
+  getDraftArticleForGap,
+  getDraftArticleById,
+  saveReviewerEdits,
+  transitionDraftStatus,
+  type ReviewStatus,
+} from "../db/models/draftArticles.js";
 const router = Router();
 
 type GapClassification =
@@ -619,13 +630,24 @@ router.post("/gaps/:id/drafts", requireTrustedOrigin, async (rawReq, res) => {
       });
     }
 
-    const accountId = req.zafSession.zendeskAccountId;
+        const accountId = req.zafSession.zendeskAccountId;
+
+    const existingDraft = await getDraftArticleForGap(
+      gapId,
+      accountId,
+    );
+
+    if (existingDraft) {
+      return res.status(200).json({
+        id: existingDraft.id,
+        gap_id: gapId,
+      });
+    }
 
     const result = await generateDraftForGap(
       accountId,
       gapId,
     );
-
     return res.status(201).json({
       id: result.draftId,
       gap_id: gapId,
@@ -655,5 +677,447 @@ if (
     });
   }
 });
+/**
+ * GET /api/dashboard/drafts
+ *
+ * Lists draft articles belonging to the authenticated
+ * Zendesk account.
+ */
+router.get("/drafts", async (rawReq, res) => {
+  const req = rawReq as unknown as AuthenticatedZafRequest;
 
+  try {
+    const accountId = req.zafSession.zendeskAccountId;
+
+    const drafts = await listDraftArticles(accountId);
+
+    return res.json({
+      drafts: drafts.map((draft) => ({
+        id: draft.id,
+        gap_id: draft.knowledge_gap_id,
+        topic: draft.topic_summary,
+        title:
+          draft.reviewer_suggested_title ??
+          draft.suggested_title,
+        ai_title: draft.suggested_title,
+        status: draft.review_status,
+        generated_at: draft.created_at,
+        reviewer_edited_at: draft.reviewer_edited_at,
+        status_updated_at: draft.status_updated_at,
+      })),
+    });
+  } catch (error) {
+    console.error(
+      "[dashboard-api] Failed to list drafts:",
+      error,
+    );
+
+    return res.status(500).json({
+      error: "Failed to load drafts",
+    });
+  }
+});
+/**
+ * GET /api/dashboard/drafts/:id
+ *
+ * Returns one draft, its AI-generated content
+ * and the reviewer's persisted revision.
+ */
+router.get("/drafts/:id", async (rawReq, res) => {
+  const req = rawReq as unknown as AuthenticatedZafRequest;
+
+  try {
+    const draftId = Number(req.params.id);
+
+    if (!Number.isInteger(draftId)) {
+      return res.status(400).json({
+        error: "Draft id must be an integer",
+      });
+    }
+
+    const accountId = req.zafSession.zendeskAccountId;
+
+    const draft = await getDraftArticleById(
+      draftId,
+      accountId,
+    );
+
+    if (!draft) {
+      return res.status(404).json({
+        error: `Draft article ${draftId} not found`,
+      });
+    }
+    return res.json({
+      id: draft.id,
+      gap_id: draft.knowledge_gap_id,
+      status: draft.review_status,
+      generated_at: draft.created_at,
+      reviewer_edited_at: draft.reviewer_edited_at,
+      status_updated_at: draft.status_updated_at,
+      rejection_reason: draft.rejection_reason,
+
+      ai_original: {
+        suggested_title: draft.suggested_title,
+        problem_summary: draft.problem_summary,
+        step_by_step_resolution:
+          draft.step_by_step_resolution,
+        faq: draft.faq_json ?? [],
+        related_keywords: draft.related_keywords ?? [],
+        internal_reviewer_notes:
+          draft.internal_reviewer_notes,
+      },
+
+      reviewer_revision: {
+        suggested_title:
+          draft.reviewer_suggested_title,
+        problem_summary:
+          draft.reviewer_problem_summary,
+        step_by_step_resolution:
+          draft.reviewer_step_by_step_resolution,
+        faq: draft.reviewer_faq_json,
+        related_keywords:
+          draft.reviewer_related_keywords,
+        internal_reviewer_notes:
+          draft.reviewer_internal_notes,
+      },
+    });
+  } catch (error) {
+    console.error(
+      "[dashboard-api] Failed to load draft:",
+      error,
+    );
+
+    return res.status(500).json({
+      error: "Failed to load draft",
+    });
+  }
+});
+/**
+ * PUT /api/dashboard/drafts/:id
+ *
+ * Saves the human reviewer's revision without modifying the
+ * immutable AI-generated draft fields.
+ */
+router.put(
+  "/drafts/:id",
+  requireTrustedOrigin,
+  async (rawReq, res) => {
+    const req =
+      rawReq as unknown as AuthenticatedZafRequest;
+
+    try {
+      const draftId = Number(req.params.id);
+
+      if (!Number.isInteger(draftId)) {
+        return res.status(400).json({
+          error: "Draft id must be an integer",
+        });
+      }
+
+      const {
+        suggested_title,
+        problem_summary,
+        step_by_step_resolution,
+        faq,
+        related_keywords,
+        internal_reviewer_notes,
+      } = req.body ?? {};
+
+      if (
+        typeof suggested_title !== "string" ||
+        typeof problem_summary !== "string" ||
+        typeof step_by_step_resolution !== "string" ||
+        typeof internal_reviewer_notes !== "string"
+      ) {
+        return res.status(400).json({
+          error: "Draft text fields must be strings",
+        });
+      }
+      if (suggested_title.trim().length === 0) {
+        return res.status(400).json({
+          error: "Article title is required",
+       });
+      }
+      if (
+        !Array.isArray(faq) ||
+        !faq.every(
+          (item) =>
+            item !== null &&
+            typeof item === "object" &&
+            typeof item.question === "string" &&
+            typeof item.answer === "string",
+        )
+      ) {
+        return res.status(400).json({
+          error:
+            "faq must be an array of question/answer objects",
+        });
+      }
+
+      if (
+        !Array.isArray(related_keywords) ||
+        !related_keywords.every(
+          (keyword) => typeof keyword === "string",
+        )
+      ) {
+        return res.status(400).json({
+          error:
+            "related_keywords must be an array of strings",
+        });
+      }
+
+      const accountId =
+        req.zafSession.zendeskAccountId;
+
+      const updated = await saveReviewerEdits(
+        draftId,
+        accountId,
+        {
+          suggestedTitle: suggested_title,
+          problemSummary: problem_summary,
+          stepByStepResolution:
+            step_by_step_resolution,
+          faq,
+          relatedKeywords: related_keywords,
+          internalReviewerNotes:
+            internal_reviewer_notes,
+        },
+      );
+
+      if (!updated) {
+        return res.status(404).json({
+          error: `Draft article ${draftId} not found`,
+        });
+      }
+
+      return res.json({
+        id: updated.id,
+        gap_id: updated.knowledge_gap_id,
+        status: updated.review_status,
+        reviewer_edited_at:
+          updated.reviewer_edited_at,
+
+        reviewer_revision: {
+          suggested_title:
+            updated.reviewer_suggested_title,
+          problem_summary:
+            updated.reviewer_problem_summary,
+          step_by_step_resolution:
+            updated.reviewer_step_by_step_resolution,
+          faq: updated.reviewer_faq_json ?? [],
+          related_keywords:
+            updated.reviewer_related_keywords ?? [],
+          internal_reviewer_notes:
+            updated.reviewer_internal_notes,
+        },
+      });
+    } catch (error) {
+  if (error instanceof ApprovedDraftModificationError) {
+    return res.status(409).json({
+      error: error.message,
+    });
+  }
+
+  console.error(
+    "[dashboard-api] Failed to save reviewer edits:",
+    error,
+  );
+
+  return res.status(500).json({
+    error: "Failed to save reviewer edits",
+  });
+}
+  },
+);
+/**
+ * POST /api/dashboard/drafts/:id/status
+ *
+ * Changes a draft's review status while enforcing the review lifecycle
+ * in the backend. Rejections require a reason.
+ */
+router.post(
+  "/drafts/:id/status",
+  requireTrustedOrigin,
+  async (rawReq, res) => {
+    const req =
+      rawReq as unknown as AuthenticatedZafRequest;
+
+    try {
+      const draftId = Number(req.params.id);
+
+      if (!Number.isInteger(draftId)) {
+        return res.status(400).json({
+          error: "Draft id must be an integer",
+        });
+      }
+
+      const { status, rejection_reason } =
+        req.body ?? {};
+
+      const allowedStatuses: ReviewStatus[] = [
+        "draft",
+        "in_review",
+        "approved",
+        "rejected",
+      ];
+
+      if (
+        typeof status !== "string" ||
+        !allowedStatuses.includes(
+          status as ReviewStatus,
+        )
+      ) {
+        return res.status(400).json({
+          error:
+            "status must be one of: draft, in_review, approved, rejected",
+        });
+      }
+
+      if (
+        rejection_reason !== undefined &&
+        typeof rejection_reason !== "string"
+      ) {
+        return res.status(400).json({
+          error: "rejection_reason must be a string",
+        });
+      }
+
+      const accountId =
+        req.zafSession.zendeskAccountId;
+
+      await transitionDraftStatus(
+        draftId,
+        accountId,
+        status as ReviewStatus,
+        rejection_reason,
+      );
+
+      return res.json({
+        id: draftId,
+        status,
+        rejection_reason:
+          status === "rejected"
+            ? rejection_reason.trim()
+            : null,
+      });
+    } catch (error) {
+      if (error instanceof DraftArticleNotFoundError) {
+        return res.status(404).json({
+          error: error.message,
+        });
+      }
+
+      if (
+        error instanceof RejectionReasonRequiredError
+      ) {
+        return res.status(400).json({
+          error: error.message,
+        });
+      }
+
+      if (
+        error instanceof InvalidStatusTransitionError
+      ) {
+        return res.status(409).json({
+          error: error.message,
+        });
+      }
+
+      console.error(
+        "[dashboard-api] Failed to update draft status:",
+        error,
+      );
+
+      return res.status(500).json({
+        error: "Failed to update draft status",
+      });
+    }
+  },
+);
+/**
+ * POST /api/dashboard/drafts/:id/regenerate
+ *
+ * Regenerates a draft through the existing HCIQ-13 generation flow.
+ * The selected draft is resolved within the authenticated Zendesk
+ * account, and its knowledge gap is used for generation.
+ *
+ * Regeneration refreshes the same draft; no draft version is created.
+ */
+router.post(
+  "/drafts/:id/regenerate",
+  requireTrustedOrigin,
+  async (rawReq, res) => {
+    const req =
+      rawReq as unknown as AuthenticatedZafRequest;
+
+    try {
+      const draftId = Number(req.params.id);
+
+      if (!Number.isInteger(draftId)) {
+        return res.status(400).json({
+          error: "Draft id must be an integer",
+        });
+      }
+
+      const accountId =
+        req.zafSession.zendeskAccountId;
+
+      // Never trust a gap id supplied by the client.
+      // Resolve it from the account-scoped draft.
+      const existingDraft = await getDraftArticleById(
+        draftId,
+        accountId,
+      );
+
+      if (!existingDraft) {
+        return res.status(404).json({
+          error: `Draft article ${draftId} not found`,
+        });
+      }
+      if (existingDraft.review_status === "approved") {
+        return res.status(409).json({
+          error: "Approved drafts cannot be edited or regenerated.",
+        });
+     }
+      const regeneratedDraft =
+        await generateDraftForGap(
+          accountId,
+          existingDraft.knowledge_gap_id,
+     );
+
+      return res.status(200).json({
+        draft_id: regeneratedDraft.draftId,
+        gap_id: existingDraft.knowledge_gap_id,
+     });
+    } catch (error) {
+      if (error instanceof ApprovedDraftModificationError) {
+        return res.status(409).json({
+          error: error.message,
+       });
+      }
+      if (error instanceof KnowledgeGapNotFoundError) {
+        return res.status(404).json({
+          error: error.message,
+        });
+      }
+
+      if (
+        error instanceof KnowledgeGapMissingClusterError
+      ) {
+        return res.status(422).json({
+          error: error.message,
+        });
+      }
+
+      console.error(
+        "[dashboard-api] Failed to regenerate draft:",
+        error,
+      );
+
+      return res.status(500).json({
+        error: "Failed to regenerate draft",
+      });
+    }
+  },
+);
 export default router;

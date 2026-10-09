@@ -7,8 +7,12 @@ import {
 } from "vitest";
 import request from "supertest";
 
-const { mockGenerateDraftForGap } = vi.hoisted(() => ({
+const {
+  mockGenerateDraftForGap,
+  mockGetDraftArticleForGap,
+} = vi.hoisted(() => ({
   mockGenerateDraftForGap: vi.fn(),
+  mockGetDraftArticleForGap: vi.fn(),
 }));
 
 vi.mock(
@@ -23,6 +27,22 @@ vi.mock(
       ...actual,
       generateDraftForGap:
         mockGenerateDraftForGap,
+    };
+  },
+);
+
+vi.mock(
+  "../../src/db/models/draftArticles.js",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("../../src/db/models/draftArticles.js")
+      >();
+
+    return {
+      ...actual,
+      getDraftArticleForGap:
+        mockGetDraftArticleForGap,
     };
   },
 );
@@ -46,6 +66,7 @@ describe("HCIQ-15 dashboard draft API", () => {
       TEST_APP_ORIGIN;
 
     vi.clearAllMocks();
+    mockGetDraftArticleForGap.mockResolvedValue(null);
   });
 
   it("rejects anonymous draft generation", async () => {
