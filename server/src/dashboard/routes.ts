@@ -9,6 +9,7 @@ import {
   KnowledgeGapNotFoundError,
 } from "../drafts/runDraftGeneration.js";
 import {
+  ApprovedDraftModificationError,
   DraftArticleNotFoundError,
   InvalidStatusTransitionError,
   RejectionReasonRequiredError,
@@ -832,7 +833,11 @@ router.put(
           error: "Draft text fields must be strings",
         });
       }
-
+      if (suggested_title.trim().length === 0) {
+        return res.status(400).json({
+          error: "Article title is required",
+       });
+      }
       if (
         !Array.isArray(faq) ||
         !faq.every(
@@ -907,15 +912,21 @@ router.put(
         },
       });
     } catch (error) {
-      console.error(
-        "[dashboard-api] Failed to save reviewer edits:",
-        error,
-      );
+  if (error instanceof ApprovedDraftModificationError) {
+    return res.status(409).json({
+      error: error.message,
+    });
+  }
 
-      return res.status(500).json({
-        error: "Failed to save reviewer edits",
-      });
-    }
+  console.error(
+    "[dashboard-api] Failed to save reviewer edits:",
+    error,
+  );
+
+  return res.status(500).json({
+    error: "Failed to save reviewer edits",
+  });
+}
   },
 );
 /**
@@ -1063,7 +1074,11 @@ router.post(
           error: `Draft article ${draftId} not found`,
         });
       }
-
+      if (existingDraft.review_status === "approved") {
+        return res.status(409).json({
+          error: "Approved drafts cannot be edited or regenerated.",
+        });
+     }
       const regeneratedDraft =
         await generateDraftForGap(
           accountId,
@@ -1075,6 +1090,11 @@ router.post(
         gap_id: existingDraft.knowledge_gap_id,
      });
     } catch (error) {
+      if (error instanceof ApprovedDraftModificationError) {
+        return res.status(409).json({
+          error: error.message,
+       });
+      }
       if (error instanceof KnowledgeGapNotFoundError) {
         return res.status(404).json({
           error: error.message,

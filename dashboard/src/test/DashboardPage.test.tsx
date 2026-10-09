@@ -1625,6 +1625,111 @@ it(
     ).toBeInTheDocument();
   },
 );
+it.each(["", "   "])(
+  "prevents saving a blank reviewer title %j",
+  async (invalidTitle) => {
+    const defaultFetch = mockFetch.getMockImplementation();
+
+    if (!defaultFetch) {
+      throw new Error("Default fetch mock is not installed.");
+    }
+
+    mockFetch.mockImplementation(
+      (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url === "/api/dashboard/drafts") {
+          return Promise.resolve(
+            jsonResponse({
+              drafts: [
+                {
+                  id: 101,
+                  gap_id: 12,
+                  topic: "Password Reset",
+                  title: "Reset your password",
+                  ai_title: "Reset your password",
+                  status: "draft",
+                  generated_at: "2026-09-25T10:00:00.000Z",
+                  reviewer_edited_at: null,
+                  status_updated_at: null,
+                },
+              ],
+            }),
+          );
+        }
+
+        if (
+          url === "/api/dashboard/drafts/101" &&
+          !init?.method
+        ) {
+          return Promise.resolve(
+            jsonResponse({
+              id: 101,
+              gap_id: 12,
+              status: "draft",
+              generated_at: "2026-09-25T10:00:00.000Z",
+              reviewer_edited_at: null,
+              status_updated_at: null,
+              rejection_reason: null,
+              ai_original: {
+                suggested_title: "Reset your password",
+                problem_summary: "Password reset issue.",
+                step_by_step_resolution: "Reset the password.",
+                faq: [],
+                related_keywords: ["password"],
+                internal_reviewer_notes: "",
+              },
+              reviewer_revision: {
+                suggested_title: null,
+                problem_summary: null,
+                step_by_step_resolution: null,
+                faq: null,
+                related_keywords: null,
+                internal_reviewer_notes: null,
+              },
+            }),
+          );
+        }
+
+        return defaultFetch(input, init);
+      },
+    );
+
+    render(<DashboardPage />);
+
+    await screen.findByText("Reset your password");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review" }),
+    );
+
+    const titleInput = await screen.findByDisplayValue(
+      "Reset your password",
+    );
+
+    fireEvent.change(titleInput, {
+      target: { value: invalidTitle },
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save Changes" }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Article title is required. Please enter a title before saving.",
+      ),
+    ).toBeInTheDocument();
+
+    expect(
+      mockFetch.mock.calls.some(
+        ([input, init]) =>
+          String(input) === "/api/dashboard/drafts/101" &&
+          init?.method === "PUT",
+      ),
+    ).toBe(false);
+  },
+);
 it(
   "sends a draft to review",
   async () => {
@@ -2516,9 +2621,10 @@ it(
 it(
   "protects unsaved reviewer edits before regenerating the draft",
   async () => {
-    let regenerateCalls = 0;
+  let regenerateCalls = 0;
+  let draftRegenerated = false;
 
-    vi.mocked(fetch).mockImplementation(
+  vi.mocked(fetch).mockImplementation(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
 
@@ -2569,6 +2675,34 @@ it(
         }
 
         if (url === "/api/dashboard/drafts/102") {
+          if (draftRegenerated) {
+  return jsonResponse({
+    id: 102,
+    gap_id: 12,
+    status: "draft",
+    generated_at: "2026-09-29T09:00:00.000Z",
+    reviewer_edited_at: null,
+    status_updated_at: null,
+    rejection_reason: null,
+    ai_original: {
+      suggested_title: "Improved Password Reset Guide",
+      problem_summary: "Updated password reset guidance.",
+      step_by_step_resolution:
+        "Open settings and follow the updated reset steps.",
+      faq: [],
+      related_keywords: ["password", "login"],
+      internal_reviewer_notes: "",
+    },
+    reviewer_revision: {
+      suggested_title: null,
+      problem_summary: null,
+      step_by_step_resolution: null,
+      faq: null,
+      related_keywords: null,
+      internal_reviewer_notes: null,
+    },
+  });
+}
           return jsonResponse({
             id: 102,
             gap_id: 12,
@@ -2611,61 +2745,16 @@ it(
           init?.method === "POST"
         ) {
           regenerateCalls += 1;
-
+          draftRegenerated = true;
           return jsonResponse(
-            {
-              draft_id: 103,
+            {  
+              draft_id: 102,
               gap_id: 12,
-            },
-            201,
-          );
+           },
+           200,
+   );
         }
-
-        if (url === "/api/dashboard/drafts/103") {
-          return jsonResponse({
-            id: 103,
-            gap_id: 12,
-            status: "draft",
-            version: 3,
-            generated_at: "2026-09-29T09:00:00.000Z",
-            reviewer_edited_at: null,
-            status_updated_at: null,
-            rejection_reason: null,
-            ai_original: {
-              suggested_title: "Reset your password V3",
-              problem_summary: "Updated password reset guidance.",
-              step_by_step_resolution:
-                "Open settings and follow the updated reset steps.",
-              faq: [],
-              related_keywords: ["password", "login"],
-              internal_reviewer_notes: "",
-            },
-            reviewer_revision: {
-              suggested_title: null,
-              problem_summary: null,
-              step_by_step_resolution: null,
-              faq: null,
-              related_keywords: null,
-              internal_reviewer_notes: null,
-            },
-            versions: [
-              {
-                id: 102,
-                version: 2,
-                status: "draft",
-                generated_at: "2026-09-29T08:00:00.000Z",
-              },
-              {
-                id: 103,
-                version: 3,
-                status: "draft",
-                generated_at: "2026-09-29T09:00:00.000Z",
-              },
-            ],
-          });
-        }
-
-        return jsonResponse({}, 404);
+      return jsonResponse({}, 404);
       },
     );
 
@@ -2731,7 +2820,7 @@ it(
     });
 
     expect(
-      await screen.findByDisplayValue("Reset your password V3"),
+      await screen.findByDisplayValue("Improved Password Reset Guide"),
     ).toBeInTheDocument();
   },
 );
@@ -3100,6 +3189,121 @@ it(
     );
   },
 );
+
+it.each(["", "   "])(
+  "exports AI title when reviewer title is blank %j",
+  async (invalidTitle) => {
+    const defaultFetch = mockFetch.getMockImplementation();
+
+    if (!defaultFetch) {
+      throw new Error("Default fetch mock is not installed.");
+    }
+
+    const writeText = vi.fn().mockResolvedValue(undefined);
+
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+
+    mockFetch.mockImplementation(
+      (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url === "/api/dashboard/drafts") {
+          return Promise.resolve(
+            jsonResponse({
+              drafts: [
+                {
+                  id: 101,
+                  gap_id: 12,
+                  topic: "Password Reset",
+                  title: invalidTitle,
+                  ai_title: "Reset your password",
+                  status: "in_review",
+                  generated_at: "2026-09-25T10:00:00.000Z",
+                  reviewer_edited_at: null,
+                  status_updated_at: null,
+                },
+              ],
+            }),
+          );
+        }
+
+        if (url === "/api/dashboard/drafts/101") {
+          return Promise.resolve(
+            jsonResponse({
+              id: 101,
+              gap_id: 12,
+              status: "in_review",
+              generated_at: "2026-09-25T10:00:00.000Z",
+              reviewer_edited_at: null,
+              status_updated_at: null,
+              rejection_reason: null,
+              ai_original: {
+                suggested_title: "Reset your password",
+                problem_summary: "Original summary.",
+                step_by_step_resolution: "Original steps.",
+                faq: [],
+                related_keywords: ["password"],
+                internal_reviewer_notes: "",
+              },
+              reviewer_revision: {
+                suggested_title: invalidTitle,
+                problem_summary: null,
+                step_by_step_resolution: null,
+                faq: null,
+                related_keywords: null,
+                internal_reviewer_notes: null,
+              },
+            }),
+          );
+        }
+
+        return defaultFetch(input, init);
+      },
+    );
+
+    render(<DashboardPage />);
+
+    const reviewButton = await screen.findByRole(
+      "button",
+      { name: "Review" },
+    );
+
+fireEvent.click(reviewButton);
+    await screen.findByText("AI vs Reviewer Comparison");
+
+    fireEvent.click(
+  screen.getByRole("button", { name: "Copy Markdown" }),
+);
+
+await waitFor(() => {
+  expect(writeText).toHaveBeenCalledTimes(1);
+});
+
+const copiedMarkdown = writeText.mock.calls[0][0];
+
+expect(copiedMarkdown).toContain("# Reset your password");
+expect(copiedMarkdown).not.toMatch(/^#\s*$/m);
+
+// Verify HTML export uses the same title fallback.
+fireEvent.click(
+  screen.getByRole("button", { name: "Copy HTML" }),
+);
+
+await waitFor(() => {
+  expect(writeText).toHaveBeenCalledTimes(2);
+});
+
+const copiedHtml = writeText.mock.calls[1][0];
+
+expect(copiedHtml).toContain(
+  "<h1>Reset your password</h1>",
+);
+expect(copiedHtml).not.toMatch(/<h1>\s*<\/h1>/);
+  },
+);
 it(
   "copies the reviewed draft as HTML",
   async () => {
@@ -3233,7 +3437,53 @@ it(
     await screen.findByText(
       "AI vs Reviewer Comparison",
     );
+    expect(
+  screen.getByDisplayValue("Updated Password Reset Guide"),
+).toBeDisabled();
 
+expect(
+  screen.getByDisplayValue("Reviewed summary."),
+).toBeDisabled();
+
+expect(
+  screen.getByDisplayValue("Open settings and reset password."),
+).toBeDisabled();
+
+expect(
+  screen.getByDisplayValue("password, reset"),
+).toBeDisabled();
+
+expect(
+  screen.getByDisplayValue("Reviewed by knowledge manager."),
+).toBeDisabled();
+
+expect(
+  screen.getByPlaceholderText("Question"),
+).toBeDisabled();
+
+expect(
+  screen.getByPlaceholderText("Answer"),
+).toBeDisabled();
+
+expect(
+  screen.getByRole("button", { name: "Add FAQ" }),
+).toBeDisabled();
+
+expect(
+  screen.getByRole("button", { name: "Remove FAQ" }),
+).toBeDisabled();
+
+expect(
+  screen.getByRole("button", { name: "Save Changes" }),
+).toBeDisabled();
+
+expect(
+  screen.getByRole("button", { name: "Regenerate Draft" }),
+).toBeDisabled();
+
+expect(
+  screen.getByRole("button", { name: "Copy HTML" }),
+).toBeEnabled();
     fireEvent.click(
       screen.getByRole("button", {
         name: "Copy HTML",

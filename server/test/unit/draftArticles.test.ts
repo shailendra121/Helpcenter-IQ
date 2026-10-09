@@ -15,6 +15,8 @@ const {
   createDraftArticle,
   listDraftArticles,
   transitionDraftStatus,
+  ApprovedDraftModificationError,
+  saveReviewerEdits,
   InvalidStatusTransitionError,
   RejectionReasonRequiredError,
   DraftArticleNotFoundError,
@@ -191,7 +193,7 @@ describe("transitionDraftStatus — status lifecycle enforcement", () => {
     .mockResolvedValueOnce({ rows: [] }) // BEGIN
     .mockResolvedValueOnce({ rows: [] }) // advisory lock
     .mockResolvedValueOnce({
-      rows: [{ id: 501 }],
+      rows: [{ id: 501, review_status: "rejected" }],
     }) // existing draft
     .mockResolvedValueOnce({ rows: [] }) // UPDATE existing draft
     .mockResolvedValueOnce({ rows: [] }); // COMMIT
@@ -229,6 +231,17 @@ describe("transitionDraftStatus — status lifecycle enforcement", () => {
     expect.stringContaining("UPDATE draft_articles"),
     expect.arrayContaining([501, 100])
   );
+  const updateSql = String(mockClientQuery.mock.calls[3][0]);
+
+expect(updateSql).toContain("review_status = 'draft'");
+expect(updateSql).toContain("rejection_reason = NULL");
+expect(updateSql).toContain("reviewer_suggested_title = NULL");
+expect(updateSql).toContain("reviewer_problem_summary = NULL");
+expect(updateSql).toContain("reviewer_step_by_step_resolution = NULL");
+expect(updateSql).toContain("reviewer_faq_json = NULL");
+expect(updateSql).toContain("reviewer_related_keywords = NULL");
+expect(updateSql).toContain("reviewer_internal_notes = NULL");
+expect(updateSql).toContain("reviewer_edited_at = NULL");
 
   const executedSql = mockClientQuery.mock.calls
     .map(([sql]) => String(sql))
@@ -240,6 +253,75 @@ describe("transitionDraftStatus — status lifecycle enforcement", () => {
   );
 
   expect(mockClientQuery).toHaveBeenCalledWith("COMMIT");
+  expect(mockRelease).toHaveBeenCalledOnce();
+});
+it("blocks regeneration of an approved draft", async () => {
+  mockClientQuery
+    .mockResolvedValueOnce({ rows: [] }) // BEGIN
+    .mockResolvedValueOnce({ rows: [] }) // advisory lock
+    .mockResolvedValueOnce({
+      rows: [{ id: 501, review_status: "approved" }],
+    }) // SELECT existing draft
+    .mockResolvedValueOnce({ rows: [] }); // ROLLBACK
+
+  await expect(
+    createDraftArticle({
+      knowledgeGapId: 10,
+      zendeskAccountId: 100,
+      suggestedTitle: "New AI title",
+      problemSummary: "New summary",
+      stepByStepResolution: "New steps",
+      faq: [],
+      relatedKeywords: [],
+      internalReviewerNotes: "New notes",
+      aiModelUsed: "gemini-test",
+    })
+  ).rejects.toThrow(ApprovedDraftModificationError);
+
+  const executedSql = mockClientQuery.mock.calls
+    .map(([sql]) => String(sql))
+    .join("\n");
+
+  expect(executedSql).not.toMatch(
+    /UPDATE\s+draft_articles/i
+  );
+
+  expect(mockClientQuery).toHaveBeenCalledWith("ROLLBACK");
+  expect(mockClientQuery).not.toHaveBeenCalledWith("COMMIT");
+  expect(mockRelease).toHaveBeenCalledOnce();
+});
+it("blocks reviewer edits on an approved draft", async () => {
+  mockClientQuery
+    .mockResolvedValueOnce({ rows: [] }) // BEGIN
+    .mockResolvedValueOnce({
+      rows: [{ review_status: "approved" }],
+    }) // SELECT ... FOR UPDATE
+    .mockResolvedValueOnce({ rows: [] }); // ROLLBACK
+
+  await expect(
+    saveReviewerEdits(501, 100, {
+      suggestedTitle: "Modified approved title",
+      problemSummary: "Modified summary",
+      stepByStepResolution: "Modified steps",
+      faq: [],
+      relatedKeywords: [],
+      internalReviewerNotes: "Modified notes",
+    })
+  ).rejects.toThrow(ApprovedDraftModificationError);
+
+  expect(mockClientQuery).toHaveBeenNthCalledWith(
+    2,
+    expect.stringContaining("FOR UPDATE"),
+    [501, 100]
+  );
+
+  const executedSql = mockClientQuery.mock.calls
+    .map(([sql]) => String(sql))
+    .join("\n");
+
+  expect(executedSql).not.toMatch(/UPDATE\s+draft_articles/i);
+  expect(mockClientQuery).toHaveBeenCalledWith("ROLLBACK");
+  expect(mockClientQuery).not.toHaveBeenCalledWith("COMMIT");
   expect(mockRelease).toHaveBeenCalledOnce();
 });
 it("lists draft articles without version filtering", async () => {

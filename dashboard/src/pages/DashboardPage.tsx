@@ -472,7 +472,12 @@ setDraftActionMessage("");
     if (!selectedDraft || !draftForm) {
       return;
     }
-
+  if (!draftForm.suggested_title.trim()) {
+  setDraftActionMessage(
+    "Article title is required. Please enter a title before saving.",
+  );
+  return;
+}
     try {
       setSavingDraft(true);
       setDraftActionMessage("");
@@ -664,7 +669,9 @@ setDraftActionMessage("");
       try {
         const exportableDraft = {
           suggestedTitle:
-            draftForm.suggested_title,
+            draftForm.suggested_title.trim() ||
+            selectedDraft?.ai_original.suggested_title?.trim() ||
+            "Untitled Article",
           problemSummary:
             draftForm.problem_summary,
           stepByStepResolution:
@@ -696,7 +703,7 @@ setDraftActionMessage("");
         );
       }
     },
-    [draftForm],
+    [draftForm, selectedDraft],
   );
 
   /*
@@ -2704,6 +2711,7 @@ useEffect(() => {
     <input
       type="text"
       value={draftForm.suggested_title}
+      disabled={selectedDraft.status === "approved"}
       onChange={(event) => {
        setDraftForm({
         ...draftForm,
@@ -2726,6 +2734,7 @@ useEffect(() => {
 
     <textarea
       value={draftForm.problem_summary}
+      disabled={selectedDraft.status === "approved"}
       onChange={(event) => {
         setDraftForm({
          ...draftForm,
@@ -2749,6 +2758,7 @@ useEffect(() => {
 
     <textarea
       value={draftForm.step_by_step_resolution}
+      disabled={selectedDraft.status === "approved"}
       onChange={(event) => {
         setDraftForm({
          ...draftForm,
@@ -2777,6 +2787,7 @@ useEffect(() => {
       )}
       <button
   type="button"
+  disabled={selectedDraft.status === "approved"}
   onClick={() => {
   setDraftForm({
     ...draftForm,
@@ -2810,6 +2821,7 @@ useEffect(() => {
           <input
             type="text"
             value={item.question}
+            disabled={selectedDraft.status === "approved"}
             placeholder="Question"
             onChange={(event) => {
               const faq = [...draftForm.faq];
@@ -2835,6 +2847,7 @@ useEffect(() => {
 
           <textarea
             value={item.answer}
+            disabled={selectedDraft.status === "approved"}
             placeholder="Answer"
             rows={3}
             onChange={(event) => {
@@ -2859,6 +2872,7 @@ useEffect(() => {
           />
           <button
   type="button"
+  disabled={selectedDraft.status === "approved"}
   onClick={() => {
     const faq = draftForm.faq.filter(
       (_, faqIndex) => faqIndex !== index,
@@ -2887,6 +2901,7 @@ useEffect(() => {
     <input
       type="text"
       value={draftForm.related_keywords.join(", ")}
+      disabled={selectedDraft.status === "approved"}
       onChange={(event) => {
         setDraftForm({
          ...draftForm,
@@ -2912,6 +2927,7 @@ useEffect(() => {
 
     <textarea
       value={draftForm.internal_reviewer_notes}
+      disabled={selectedDraft.status === "approved"}
       onChange={(event) => {
         setDraftForm({
          ...draftForm,
@@ -2933,7 +2949,7 @@ useEffect(() => {
     <button
       type="button"
       onClick={() => void saveDraftEdits()}
-      disabled={savingDraft}
+      disabled={savingDraft || selectedDraft.status === "approved"}
     >
       {savingDraft
         ? "Saving..."
@@ -2972,7 +2988,7 @@ useEffect(() => {
 
   void regenerateDraft();
 }}
-    disabled={regeneratingDraft}
+    disabled={regeneratingDraft || selectedDraft.status === "approved"}
   >
     {regeneratingDraft
       ? "Regenerating..."

@@ -10,6 +10,7 @@ import {
   DraftArticleNotFoundError,
   InvalidStatusTransitionError,
   RejectionReasonRequiredError,
+  ApprovedDraftModificationError,
 } from "../../src/db/models/draftArticles.js";
 
 const {
@@ -389,7 +390,41 @@ it("rejects malformed reviewer edit content", async () => {
 
   expect(mockSaveReviewerEdits).not.toHaveBeenCalled();
 });
+ it.each(["", "   "])(
+  "rejects blank reviewer title %j",
+  async (invalidTitle) => {
+    const sessionToken = createZafSessionToken(
+      1,
+      "d3v-astonous",
+    );
 
+    const response = await request(app)
+      .put("/api/dashboard/drafts/500")
+      .set(
+        "Cookie",
+        `hciq_zaf_session=${sessionToken}`,
+      )
+      .set("Origin", "https://helpcenteriq.test")
+      .send({
+        suggested_title: invalidTitle,
+        problem_summary: "Valid problem summary",
+        step_by_step_resolution: "Valid resolution",
+        faq: [],
+        related_keywords: ["password"],
+        internal_reviewer_notes: "Reviewed",
+      });
+
+    expect(response.status).toBe(400);
+
+    expect(response.body.error).toBe(
+      "Article title is required",
+    );
+
+    expect(
+      mockSaveReviewerEdits,
+    ).not.toHaveBeenCalled();
+  },
+);
 it("saves reviewer edits separately for the authenticated account", async () => {
   mockSaveReviewerEdits.mockResolvedValueOnce({
     id: 500,
@@ -504,6 +539,42 @@ it("saves reviewer edits separately for the authenticated account", async () => 
   expect(
     response.body.reviewer_revision.suggested_title,
   ).not.toBe("Original AI title");
+});
+
+it("returns 409 when editing an approved draft", async () => {
+  mockSaveReviewerEdits.mockRejectedValueOnce(
+    new ApprovedDraftModificationError()
+  );
+
+  const sessionToken = createZafSessionToken(
+    1,
+    "d3v-astonous"
+  );
+
+  const response = await request(app)
+    .put("/api/dashboard/drafts/500")
+    .set("Cookie", `hciq_zaf_session=${sessionToken}`)
+    .set("Origin", "https://helpcenteriq.test")
+    .send({
+      suggested_title: "Modified approved title",
+      problem_summary: "Modified summary",
+      step_by_step_resolution: "Modified steps",
+      faq: [],
+      related_keywords: [],
+      internal_reviewer_notes: "Modified notes",
+    });
+
+  expect(response.status).toBe(409);
+
+  expect(response.body.error).toBe(
+    "Approved drafts cannot be edited or regenerated."
+  );
+
+  expect(mockSaveReviewerEdits).toHaveBeenCalledWith(
+    500,
+    1,
+    expect.any(Object)
+  );
 });
 
 it("returns 404 when saving edits to a draft outside the authenticated account", async () => {
@@ -817,6 +888,39 @@ it("regenerates a draft using its account-scoped knowledge gap", async () => {
     draft_id: 500,
     gap_id: 10,
   });
+});
+
+it("returns 409 without calling AI when regenerating an approved draft", async () => {
+  mockGetDraftArticleById.mockResolvedValueOnce({
+    id: 500,
+    knowledge_gap_id: 10,
+    zendesk_account_id: 1,
+    review_status: "approved",
+  });
+
+  const sessionToken = createZafSessionToken(
+    1,
+    "d3v-astonous"
+  );
+
+  const response = await request(app)
+    .post("/api/dashboard/drafts/500/regenerate")
+    .set("Cookie", `hciq_zaf_session=${sessionToken}`)
+    .set("Origin", "https://helpcenteriq.test")
+    .send();
+
+  expect(response.status).toBe(409);
+
+  expect(response.body.error).toBe(
+    "Approved drafts cannot be edited or regenerated."
+  );
+
+  expect(mockGetDraftArticleById).toHaveBeenCalledWith(
+    500,
+    1
+  );
+
+  expect(mockGenerateDraftForGap).not.toHaveBeenCalled();
 });
 
 it("does not regenerate a draft outside the authenticated account", async () => {

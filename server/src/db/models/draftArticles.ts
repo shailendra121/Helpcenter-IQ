@@ -37,19 +37,24 @@ export async function createDraftArticle(
       [13, input.knowledgeGapId]
     );
 
-    const existing = await client.query<{ id: number }>(
-      `SELECT id
-       FROM draft_articles
-       WHERE knowledge_gap_id = $1
-         AND zendesk_account_id = $2
-       LIMIT 1
-       FOR UPDATE`,
-      [input.knowledgeGapId, input.zendeskAccountId]
-    );
+const existing = await client.query<{
+  id: number;
+  review_status: ReviewStatus;
+}>(
+  `SELECT id, review_status
+   FROM draft_articles
+   WHERE knowledge_gap_id = $1
+     AND zendesk_account_id = $2
+   LIMIT 1
+   FOR UPDATE`,
+  [input.knowledgeGapId, input.zendeskAccountId]
+);
 
     if (existing.rows.length > 0) {
       const draftId = existing.rows[0].id;
-
+      if (existing.rows[0].review_status === "approved") {
+        throw new ApprovedDraftModificationError();
+}
       await client.query(
         `UPDATE draft_articles
          SET suggested_title = $1,
@@ -58,7 +63,17 @@ export async function createDraftArticle(
              faq_json = $4,
              related_keywords = $5,
              internal_reviewer_notes = $6,
-             ai_model_used = $7
+                          ai_model_used = $7,
+             review_status = 'draft',
+             rejection_reason = NULL,
+             reviewer_suggested_title = NULL,
+             reviewer_problem_summary = NULL,
+             reviewer_step_by_step_resolution = NULL,
+             reviewer_faq_json = NULL,
+             reviewer_related_keywords = NULL,
+             reviewer_internal_notes = NULL,
+             reviewer_edited_at = NULL,
+             status_updated_at = NOW()
          WHERE id = $8
            AND zendesk_account_id = $9`,
         [
@@ -108,6 +123,12 @@ export async function createDraftArticle(
     client.release();
   }
 }
+export class ApprovedDraftModificationError extends Error {
+  constructor() {
+    super("Approved drafts cannot be edited or regenerated.");
+    this.name = "ApprovedDraftModificationError";
+  }
+}
 
 export interface SaveReviewerEditsInput {
   suggestedTitle: string;
@@ -144,31 +165,65 @@ export async function saveReviewerEdits(
   zendeskAccountId: number,
   input: SaveReviewerEditsInput
 ): Promise<DraftArticleRow | null> {
-  const result = await pool.query<DraftArticleRow>(
-    `UPDATE draft_articles
-     SET reviewer_suggested_title = $1,
-         reviewer_problem_summary = $2,
-         reviewer_step_by_step_resolution = $3,
-         reviewer_faq_json = $4,
-         reviewer_related_keywords = $5,
-         reviewer_internal_notes = $6,
-         reviewer_edited_at = NOW()
-     WHERE id = $7
-       AND zendesk_account_id = $8
-     RETURNING *`,
-    [
-      input.suggestedTitle,
-      input.problemSummary,
-      input.stepByStepResolution,
-      JSON.stringify(input.faq),
-      input.relatedKeywords,
-      input.internalReviewerNotes,
-      draftId,
-      zendeskAccountId,
-    ]
-  );
+  const client = await pool.connect();
 
-  return result.rows[0] ?? null;
+  try {
+    await client.query("BEGIN");
+
+    const current = await client.query<{
+      review_status: ReviewStatus;
+    }>(
+      `SELECT review_status
+       FROM draft_articles
+       WHERE id = $1
+         AND zendesk_account_id = $2
+       FOR UPDATE`,
+      [draftId, zendeskAccountId]
+    );
+
+    if (current.rows.length === 0) {
+      await client.query("COMMIT");
+      return null;
+    }
+
+    if (current.rows[0].review_status === "approved") {
+      throw new ApprovedDraftModificationError();
+    }
+
+    const result = await client.query<DraftArticleRow>(
+      `UPDATE draft_articles
+       SET reviewer_suggested_title = $1,
+           reviewer_problem_summary = $2,
+           reviewer_step_by_step_resolution = $3,
+           reviewer_faq_json = $4,
+           reviewer_related_keywords = $5,
+           reviewer_internal_notes = $6,
+           reviewer_edited_at = NOW()
+       WHERE id = $7
+         AND zendesk_account_id = $8
+         AND review_status <> 'approved'
+       RETURNING *`,
+      [
+        input.suggestedTitle,
+        input.problemSummary,
+        input.stepByStepResolution,
+        JSON.stringify(input.faq),
+        input.relatedKeywords,
+        input.internalReviewerNotes,
+        draftId,
+        zendeskAccountId,
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    return result.rows[0] ?? null;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export class RejectionReasonRequiredError extends Error {
