@@ -1,0 +1,45 @@
+name: Validate & Package Zendesk App
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'dashboard/**'
+      - 'zendesk-app/**'
+      - '.github/workflows/zendesk-app.yml'
+
+jobs:
+  build-and-package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build Dashboard Frontend
+        run: |
+          cd dashboard
+          npm ci
+          npm run build
+
+      - name: Copy Dashboard Build to Zendesk App Assets
+        run: |
+          cp -r dashboard/dist/* zendesk-app/assets/
+
+      - name: Install Zendesk CLI (zcli)
+        run: npm install -g @zendesk/zcli
+
+      - name: Validate App Package
+        run: |
+          cd zendesk-app
+          zcli apps:validate
+
+      - name: Package App for Deployment
+        run: |
+          cd zendesk-app
+          zcli apps:package
