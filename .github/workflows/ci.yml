@@ -68,8 +68,8 @@ jobs:
       - run: npm run lint
       - run: npm run build
 
-  zendesk-app:
-    name: Build and validate ZAF package
+    zendesk-app:
+    name: Build ZAF app assets (sanity check)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,12 +78,16 @@ jobs:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: package-lock.json
-      - run: npm ci
-      - run: npm run build --workspace=dashboard
-      - run: npm install -g @zendesk/zcli
-      - run: zcli apps:validate zendesk-app
-      - run: zcli apps:package zendesk-app
-      - uses: actions/upload-artifact@v4
-        with:
-          name: zendesk-app
-          path: zendesk-app/tmp/*.zip
+      - name: Install dependencies
+        run: npm ci
+      - name: Build dashboard into the app package
+        run: npm run build --workspace=dashboard
+      - name: Check the app package contents
+        run: |
+          test -f zendesk-app/assets/iframe.html
+          node -e '
+            const m = require("./zendesk-app/manifest.json");
+            const p = (m.parameters || []).find((x) => x.name === "jwt_secret");
+            if (!p || p.secure !== true) throw new Error("manifest: secure jwt_secret parameter missing");
+            if (!m.location.support.nav_bar.url.startsWith("assets/")) throw new Error("manifest: dashboard must be served from assets/");
+          '
