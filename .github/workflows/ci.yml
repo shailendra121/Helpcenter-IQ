@@ -17,7 +17,7 @@ jobs:
           POSTGRES_PASSWORD: helpcenteriq
           POSTGRES_DB: helpcenteriq
         ports:
-        - 5432:5432
+          - 5432:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -50,7 +50,7 @@ jobs:
       - run: npm test
 
   dashboard:
-    name: Dashboard - lint, typecheck, build
+    name: Dashboard - lint, typecheck, test, build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -66,9 +66,10 @@ jobs:
         working-directory: .
         run: npm ci
       - run: npm run lint
+      - run: npm test
       - run: npm run build
 
-    zendesk-app:
+  zendesk-app:
     name: Build ZAF app assets (sanity check)
     runs-on: ubuntu-latest
     steps:
@@ -90,3 +91,4 @@ jobs:
             const p = (m.parameters || []).find((x) => x.name === "jwt_secret");
             if (!p || p.secure !== true) throw new Error("manifest: secure jwt_secret parameter missing");
             if (!m.location.support.nav_bar.url.startsWith("assets/")) throw new Error("manifest: dashboard must be served from assets/");
+          '
