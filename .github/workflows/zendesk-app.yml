@@ -1,45 +1,41 @@
-name: Validate & Package Zendesk App
+name: Zendesk app package
 
+# Manual or tag-triggered: builds the dashboard into the Zendesk app, then
+# runs zcli apps:validate and apps:package and uploads the zip as an artifact.
+#
+# zcli needs a Zendesk login to validate. Add these GitHub *secrets*
+# (Settings -> Secrets and variables -> Actions -> Secrets) before running:
+#   ZENDESK_SUBDOMAIN, ZENDESK_OAUTH_CLIENT_ID, ZENDESK_OAUTH_CLIENT_SECRET
+# (or validate locally with `zcli login -i`). These are only used by zcli;
+# they are not backend/runtime secrets and nothing is deployed from here.
 on:
+  workflow_dispatch:
   push:
-    branches: [ main ]
-    paths:
-      - 'dashboard/**'
-      - 'zendesk-app/**'
-      - '.github/workflows/zendesk-app.yml'
+    tags: ["app-v*"]
 
 jobs:
-  build-and-package:
+  package:
     runs-on: ubuntu-latest
-
+    env:
+      ZENDESK_SUBDOMAIN: ${{ secrets.ZENDESK_SUBDOMAIN }}
+      ZENDESK_OAUTH_CLIENT_ID: ${{ secrets.ZENDESK_OAUTH_CLIENT_ID }}
+      ZENDESK_OAUTH_CLIENT_SECRET: ${{ secrets.ZENDESK_OAUTH_CLIENT_SECRET }}
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-
-      - name: Build Dashboard Frontend
-        run: |
-          cd dashboard
-          npm ci
-          npm run build
-
-      - name: Copy Dashboard Build to Zendesk App Assets
-        run: |
-          cp -r dashboard/dist/* zendesk-app/assets/
-
-      - name: Install Zendesk CLI (zcli)
-        run: npm install -g @zendesk/zcli
-
-      - name: Validate App Package
-        run: |
-          cd zendesk-app
-          zcli apps:validate
-
-      - name: Package App for Deployment
-        run: |
-          cd zendesk-app
-          zcli apps:package
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Build dashboard into the app package
+        run: npm run build --workspace=dashboard
+      - run: npm install -g @zendesk/zcli
+      - name: Validate ZAF package
+        run: zcli apps:validate zendesk-app
+      - name: Package ZAF app
+        run: zcli apps:package zendesk-app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zendesk-app
+          path: zendesk-app/tmp/*.zip

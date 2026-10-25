@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { apiFetch } from "../api";
 import {
   draftToHtml,
   draftToMarkdown,
@@ -286,12 +287,8 @@ export default function DashboardPage() {
    */
   const fetchDashboardSession =
     useCallback(async () => {
-      const response = await fetch(
-        "/api/dashboard/session",
-        {
-          credentials: "include",
-        },
-      );
+      const response = await apiFetch(
+        "/api/dashboard/session");
 
       if (!response.ok) {
         throw new Error(
@@ -310,12 +307,8 @@ export default function DashboardPage() {
    */
   const fetchSummary =
     useCallback(async () => {
-      const response = await fetch(
-        "/api/dashboard/summary",
-        {
-          credentials: "include",
-        },
-      );
+      const response = await apiFetch(
+        "/api/dashboard/summary");
 
       if (!response.ok) {
         throw new Error(
@@ -344,12 +337,8 @@ export default function DashboardPage() {
 
       params.set("sort", sort);
 
-      const response = await fetch(
-        `/api/dashboard/gaps?${params.toString()}`,
-        {
-          credentials: "include",
-        },
-      );
+      const response = await apiFetch(
+        `/api/dashboard/gaps?${params.toString()}`);
 
       if (!response.ok) {
         throw new Error(
@@ -368,12 +357,8 @@ export default function DashboardPage() {
       setDraftsLoading(true);
       setDraftsError("");
 
-      const response = await fetch(
-        "/api/dashboard/drafts",
-        {
-          credentials: "include",
-        },
-      );
+      const response = await apiFetch(
+        "/api/dashboard/drafts");
 
       const data = await response.json();
 
@@ -400,12 +385,8 @@ export default function DashboardPage() {
     try {
       setDraftsError("");
 
-      const response = await fetch(
-        `/api/dashboard/drafts/${draftId}`,
-        {
-          credentials: "include",
-        },
-      );
+      const response = await apiFetch(
+        `/api/dashboard/drafts/${draftId}`);
 
       const data = await response.json();
 
@@ -482,14 +463,13 @@ setDraftActionMessage("");
       setSavingDraft(true);
       setDraftActionMessage("");
 
-      const response = await fetch(
+      const response = await apiFetch(
         `/api/dashboard/drafts/${selectedDraft.id}`,
         {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
           },
-          credentials: "include",
           body: JSON.stringify({
             suggested_title:
               draftForm.suggested_title,
@@ -551,14 +531,13 @@ setDraftActionMessage("");
         setUpdatingDraftStatus(true);
         setDraftActionMessage("");
 
-        const response = await fetch(
+        const response = await apiFetch(
           `/api/dashboard/drafts/${selectedDraft.id}/status`,
           {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
-            credentials: "include",
             body: JSON.stringify({
               status: newStatus,
               ...(reason
@@ -615,14 +594,13 @@ setDraftActionMessage("");
       setRegeneratingDraft(true);
       setDraftActionMessage("");
 
-      const response = await fetch(
+      const response = await apiFetch(
         `/api/dashboard/drafts/${selectedDraft.id}/regenerate`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
-          credentials: "include",
         },
       );
 
@@ -715,12 +693,8 @@ setDraftActionMessage("");
    */
   const fetchLatestRun =
     useCallback(async () => {
-      const response = await fetch(
-        "/api/analysis-runs/latest",
-        {
-          credentials: "include",
-        },
-      );
+      const response = await apiFetch(
+        "/api/analysis-runs/latest");
 
       if (!response.ok) {
         throw new Error(
@@ -825,10 +799,9 @@ useEffect(() => {
 
     const poll = async () => {
       try {
-        const response = await fetch(
+        const response = await apiFetch(
           `/api/analysis-runs/${runId}`,
           {
-            credentials: "include",
             signal: controller.signal,
           },
         );
@@ -909,7 +882,7 @@ useEffect(() => {
         setStarting(true);
         setError("");
 
-        const response = await fetch(
+        const response = await apiFetch(
           "/api/analysis-runs",
           {
             method: "POST",
@@ -917,7 +890,6 @@ useEffect(() => {
               "Content-Type":
                 "application/json",
             },
-            credentials: "include",
             body: JSON.stringify({
               windowDays,
             }),
@@ -971,12 +943,8 @@ useEffect(() => {
         setError("");
         setDraftMessage("");
 
-        const response = await fetch(
-          `/api/dashboard/gaps/${gapId}`,
-          {
-            credentials: "include",
-          },
-        );
+        const response = await apiFetch(
+          `/api/dashboard/gaps/${gapId}`);
 
         if (!response.ok) {
           throw new Error(
@@ -1015,7 +983,7 @@ useEffect(() => {
         setDraftMessage("");
         setError("");
 
-        const response = await fetch(
+        const response = await apiFetch(
           `/api/dashboard/gaps/${selectedGap.id}/drafts`,
           {
             method: "POST",
@@ -1023,7 +991,6 @@ useEffect(() => {
               "Content-Type":
                 "application/json",
             },
-            credentials: "include",
           },
         );
 

@@ -7,7 +7,7 @@ on:
 
 jobs:
   server:
-    name: Server — lint, typecheck, test
+    name: Server - lint, typecheck, test
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -17,7 +17,7 @@ jobs:
           POSTGRES_PASSWORD: helpcenteriq
           POSTGRES_DB: helpcenteriq
         ports:
-          - 5432:5432
+        - 5432:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -28,7 +28,6 @@ jobs:
         working-directory: server
     env:
       DATABASE_URL: "postgresql://helpcenteriq:helpcenteriq@localhost:5432/helpcenteriq"
-      TOKEN_ENCRYPTION_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -36,6 +35,11 @@ jobs:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: package-lock.json
+      - name: Generate throwaway test secrets
+        run: |
+          echo "TOKEN_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "ZAF_SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "ZAF_JWT_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
       - name: Install dependencies
         working-directory: .
         run: npm ci
@@ -46,7 +50,7 @@ jobs:
       - run: npm test
 
   dashboard:
-    name: Dashboard — lint, typecheck, build
+    name: Dashboard - lint, typecheck, build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -65,25 +69,21 @@ jobs:
       - run: npm run build
 
   zendesk-app:
-    name: Validate ZAF package
+    name: Build and validate ZAF package
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: zendesk-app
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run build --workspace=dashboard
       - run: npm install -g @zendesk/zcli
-      - name: Validate ZAF package
-        env:
-          ZENDESK_SUBDOMAIN: ${{ secrets.ZENDESK_SUBDOMAIN }}
-          ZENDESK_EMAIL: ${{ secrets.ZENDESK_EMAIL }}
-          ZENDESK_API_TOKEN: ${{ secrets.ZENDESK_API_TOKEN }}
-        run: |
-          if [ -z "$ZENDESK_SUBDOMAIN" ]; then
-            echo "::warning::Zendesk credentials not configured — skipping apps:validate"
-          else
-            zcli apps:validate
-          fi
+      - run: zcli apps:validate zendesk-app
+      - run: zcli apps:package zendesk-app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zendesk-app
+          path: zendesk-app/tmp/*.zip

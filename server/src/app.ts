@@ -1,16 +1,14 @@
 import express from "express";
-import path from "path";
 
 import zendeskRoutes from "./zendesk/routes.js";
 import analysisRoutes from "./analysis/routes.js";
 import dashboardRoutes from "./dashboard/routes.js";
+import { verifyZafBearer } from "./auth/zafJwt.js";
 
 const app = express();
 
-const dashboardDistPath = path.resolve(
-  __dirname,
-  "../../dashboard/dist",
-);
+// Cloud Run proxy ke peeche hai
+app.set("trust proxy", true);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -24,9 +22,21 @@ app.get("/health", (_req, res) => {
     service: "helpcenteriq-server",
   });
 });
+// Proves a Zendesk-signed request reaches the backend (no DB needed).
+app.get("/api/zaf/ping", (req, res) => {
+  const claims = verifyZafBearer(req);
+
+  if (!claims) {
+    return res.status(401).json({ error: "Invalid ZAF JWT" });
+  }
+
+  return res.json({
+    ok: true,
+    subdomain: claims.subdomain,
+    database_configured: Boolean(process.env.DATABASE_URL),
+  });
+});
 
 app.use(zendeskRoutes);
-
-app.use(express.static(dashboardDistPath));
 
 export default app;

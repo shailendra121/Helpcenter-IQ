@@ -2,32 +2,36 @@
   "name": "HelpCenterIQ",
   "author": {
     "name": "HelpCenterIQ",
-    "email": "support@helpcenteriq.example",
-    "url": "https://helpcenteriq.example"
+    "email": "support@helpcenteriq.com"
   },
   "defaultLocale": "en",
-  "private": false,
-  "signedUrls": true,
+  "private": true,
   "location": {
     "support": {
       "nav_bar": {
-        "url": "https://app.helpcenteriq.example/zaf/dashboard",
+        "url": "assets/iframe.html",
         "flexible": true
       }
     }
   },
-  "version": "1.0",
-  "frameworkVersion": "2.0",
-  "oauth": {
-    "client_id": "REPLACE_AFTER_MARKETPLACE_REGISTRATION",
-    "client_secret": "stored server-side only — never committed",
-    "authorize_uri": "https://app.helpcenteriq.example/oauth/authorize",
-    "access_token_uri": "https://app.helpcenteriq.example/oauth/token"
-  },
-  "parameters": [
+  "domainWhitelist": [
+    "helpcenteriq-backend-295420833463.asia-south1.run.app"
+  ],
+    "parameters": [
     {
-      "name": "token",
-      "type": "oauth"
+      "name": "backendUrl",
+      "type": "text",
+      "required": true,
+      "secure": false,
+      "default": "https://helpcenteriq-backend-295420833463.asia-south1.run.app"
+    },
+    {
+      "name": "jwt_secret",
+      "type": "text",
+      "required": true,
+      "secure": true
     }
-  ]
+  ],
+  "version": "1.1.0",
+  "frameworkVersion": "2.0"
 }
