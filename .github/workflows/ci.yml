@@ -90,4 +90,3 @@ jobs:
             const p = (m.parameters || []).find((x) => x.name === "jwt_secret");
             if (!p || p.secure !== true) throw new Error("manifest: secure jwt_secret parameter missing");
             if (!m.location.support.nav_bar.url.startsWith("assets/")) throw new Error("manifest: dashboard must be served from assets/");
-          '
