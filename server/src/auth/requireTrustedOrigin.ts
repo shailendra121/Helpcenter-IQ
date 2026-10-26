@@ -20,6 +20,10 @@ export function requireTrustedOrigin(
   res: Response,
   next: NextFunction,
 ): void {
+  if ((req.get("Authorization") ?? "").startsWith("Bearer ")) {
+    next();
+    return;
+  }
   if (
     req.method === "GET" ||
     req.method === "HEAD" ||

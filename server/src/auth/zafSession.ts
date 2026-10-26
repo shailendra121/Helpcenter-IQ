@@ -1,5 +1,8 @@
 import crypto from "crypto";
 import type { NextFunction, Request, Response } from "express";
+import { verifyZafBearer } from "./zafJwt.js";
+import { findZendeskAccountBySubdomain } from "../db/models/zendeskAccounts.js";
+
 
 const COOKIE_NAME = "hciq_zaf_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 8; // 8 hours
@@ -153,7 +156,7 @@ export interface AuthenticatedZafRequest
   zafSession: ZafSession;
 }
 
-export function requireZafSession(
+function requireZafCookieSession(
   req: Request,
   res: Response,
   next: NextFunction,
@@ -186,5 +189,50 @@ export function requireZafSession(
     res.status(401).json({
       error: "Invalid ZAF session",
     });
+  }
+}
+ /**
+ * Production path: Bearer ZAF JWT from the packaged Zendesk app.
+ * The cookie path above is kept only as a local-dev / test fallback.
+ */
+export async function requireZafSession(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const authHeader = req.get("Authorization") ?? "";
+
+  if (!authHeader.startsWith("Bearer ")) {
+    requireZafCookieSession(req, res, next);
+    return;
+  }
+
+  const claims = verifyZafBearer(req);
+
+  if (!claims) {
+    res.status(401).json({ error: "Invalid ZAF JWT" });
+    return;
+  }
+
+  try {
+    const account = await findZendeskAccountBySubdomain(claims.subdomain);
+
+    if (!account) {
+      res
+        .status(404)
+        .json({ error: "not_installed", subdomain: claims.subdomain });
+      return;
+    }
+
+    (req as AuthenticatedZafRequest).zafSession = {
+      zendeskAccountId: account.id,
+      subdomain: account.subdomain,
+      exp: claims.exp,
+    };
+
+    next();
+  } catch (error) {
+    console.error("[zaf-session] account lookup failed:", error);
+    res.status(503).json({ error: "database_unavailable" });
   }
 }

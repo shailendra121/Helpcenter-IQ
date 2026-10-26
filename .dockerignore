@@ -1,0 +1,7 @@
+.git
+**/node_modules
+*/.env
+**/dist
+docs
+zendesk-app
+zendesk-app/assets/

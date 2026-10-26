@@ -1,17 +1,13 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <title>HelpCenterIQ</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HelpCenterIQ Dashboard</title>
     <script src="https://static.zdassets.com/zendesk_app_framework_sdk/2.0/zaf_sdk.min.js"></script>
+    <script type="module" crossorigin src="./assets/iframe-B5huv_b9.js"></script>
   </head>
   <body>
-    <!--
-      Thin shell only. Per ADR-0001, all real UI/logic is served from our
-      own backend (server/) and rendered in dashboard/. This file's only
-      job is to initialize the ZAF client, capture origin + app_guid, and
-      forward into the authenticated dashboard route.
-    -->
-    <script src="js/bootstrap.js"></script>
+    <div id="root"></div>
   </body>
 </html>
