@@ -127,7 +127,7 @@ router.get("/zendesk/oauth/callback", async (req, res) => {
 
     try {
       await setAppJwtSecret(subdomain, tokens.accessToken, zafSecret);
-    } catch (err) {
+    } catch {
       // Setting the app setting failed (e.g. permissions). The account is
       // still connected; log and continue — the secret is stored our side.
       console.error("Could not set jwt_secret app setting for:", subdomain);
