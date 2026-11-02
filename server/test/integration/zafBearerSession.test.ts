@@ -10,13 +10,26 @@ vi.mock("../../src/db/models/zendeskAccounts.js", async () => {
   return {
     ...actual,
     findZendeskAccountBySubdomain: vi.fn(),
+    getAccountZafSecret: vi.fn(),
   };
 });
 
+vi.mock("../../src/auth/tokenEncryption.js", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../src/auth/tokenEncryption.js")
+  >("../../src/auth/tokenEncryption.js");
+
+  return { ...actual, decryptToken: (s: string) => s };
+});
+
 import app from "../../src/app.js";
-import { findZendeskAccountBySubdomain } from "../../src/db/models/zendeskAccounts.js";
+import {
+  findZendeskAccountBySubdomain,
+  getAccountZafSecret,
+} from "../../src/db/models/zendeskAccounts.js";
 
 const mockFindAccount = vi.mocked(findZendeskAccountBySubdomain);
+const mockGetSecret = vi.mocked(getAccountZafSecret);
 
 const SECRET = "test-zaf-jwt-secret-test-zaf-jwt-secret";
 
@@ -26,8 +39,9 @@ function bearer(subdomain: string, secret = SECRET): string {
 
 describe("ZAF Bearer JWT authentication on dashboard API", () => {
   beforeEach(() => {
-    process.env.ZAF_JWT_SECRET = SECRET;
     vi.clearAllMocks();
+    // Each account has its own stored secret; for these tests it is SECRET.
+    mockGetSecret.mockResolvedValue(SECRET as never);
   });
 
   it("returns the account for a valid ZAF-signed token", async () => {
@@ -48,7 +62,10 @@ describe("ZAF Bearer JWT authentication on dashboard API", () => {
   it("rejects a token signed with the wrong secret", async () => {
     const res = await request(app)
       .get("/api/dashboard/session")
-      .set("Authorization", bearer("acme", "wrong-secret-wrong-secret-wrong-secret"));
+      .set(
+        "Authorization",
+        bearer("acme", "wrong-secret-wrong-secret-wrong-secret"),
+      );
 
     expect(res.status).toBe(401);
     expect(mockFindAccount).not.toHaveBeenCalled();

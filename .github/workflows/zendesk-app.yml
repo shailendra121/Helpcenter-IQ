@@ -3,11 +3,9 @@ name: Zendesk app package
 # Manual or tag-triggered: builds the dashboard into the Zendesk app, then
 # runs zcli apps:validate and apps:package and uploads the zip as an artifact.
 #
-# zcli needs a Zendesk login to validate. Add these GitHub *secrets*
-# (Settings -> Secrets and variables -> Actions -> Secrets) before running:
-#   ZENDESK_SUBDOMAIN, ZENDESK_OAUTH_CLIENT_ID, ZENDESK_OAUTH_CLIENT_SECRET
-# (or validate locally with `zcli login -i`). These are only used by zcli;
-# they are not backend/runtime secrets and nothing is deployed from here.
+# No Zendesk credentials are needed here: apps:validate and apps:package are
+# offline operations. (Only server operations like apps:update require a login.)
+# Nothing is deployed to Zendesk or to the backend from this workflow.
 on:
   workflow_dispatch:
   push:
@@ -16,10 +14,6 @@ on:
 jobs:
   package:
     runs-on: ubuntu-latest
-    env:
-      ZENDESK_SUBDOMAIN: ${{ secrets.ZENDESK_SUBDOMAIN }}
-      ZENDESK_OAUTH_CLIENT_ID: ${{ secrets.ZENDESK_OAUTH_CLIENT_ID }}
-      ZENDESK_OAUTH_CLIENT_SECRET: ${{ secrets.ZENDESK_OAUTH_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

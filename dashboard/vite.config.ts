@@ -8,7 +8,7 @@ export default defineConfig({
   // uploaded with ZCLI. It is NOT served by the backend.
   base: "./",
   build: {
-    outDir: "../zendesk-app/assets",
+    outDir: "../zendesk-app/assets/dashboard",
     emptyOutDir: true,
     rollupOptions: {
       input: "iframe.html",

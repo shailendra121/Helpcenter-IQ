@@ -46,7 +46,7 @@ jobs:
         run: npm run build --workspace=dashboard
       - name: Check the app package contents
         run: |
-          test -f zendesk-app/assets/iframe.html
+          test -f zendesk-app/assets/dashboard/iframe.html
           node -e '
             const m = require("./zendesk-app/manifest.json");
             const p = (m.parameters || []).find((x) => x.name === "jwt_secret");

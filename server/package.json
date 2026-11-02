@@ -2,7 +2,7 @@
   "name": "@helpcenteriq/server",
   "version": "0.1.0",
   "private": true,
-  "description": "HelpCenterIQ backend \u2014 Zendesk integration, AI pipeline, dashboard API.",
+  "description": "HelpCenterIQ backend - Zendesk integration, AI pipeline, dashboard API.",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",

@@ -1,30 +1,37 @@
 import jwt from "jsonwebtoken";
 import type { Request } from "express";
+import { getAccountZafSecret } from "../db/models/zendeskAccounts.js";
+import { decryptToken } from "./tokenEncryption.js";
 
 export interface ZafBearerClaims {
   subdomain: string;
   exp: number;
 }
 
-/**
- * Verifies the ZAF-signed HS256 JWT sent by the packaged Zendesk app
- * (Authorization: Bearer ...). Returns null if missing or invalid.
- * Does not touch the database.
- */
-export function verifyZafBearer(req: Request): ZafBearerClaims | null {
+export async function verifyZafBearer(
+  req: Request,
+): Promise<ZafBearerClaims | null> {
   const header = req.get("Authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  const secret = process.env.ZAF_JWT_SECRET;
-
-  if (!token || !secret) return null;
+  if (!token) return null;
 
   try {
-    const claims = jwt.verify(token, secret, {
+    // 1. Read the claimed subdomain WITHOUT trusting it yet.
+    const decoded = jwt.decode(token) as jwt.JwtPayload | null;
+    const claimed = String(decoded?.subdomain ?? "").toLowerCase();
+    if (!/^[a-z0-9-]+$/.test(claimed)) return null;
+
+    // 2. Look up THAT account's own secret
+    const enc = await getAccountZafSecret(claimed);
+    if (!enc) return null;
+
+    // 3. Verify the token against the account's own secret
+    const claims = jwt.verify(token, decryptToken(enc), {
       algorithms: ["HS256"],
     }) as jwt.JwtPayload;
 
     const subdomain = String(claims.subdomain ?? "").toLowerCase();
-    if (!/^[a-z0-9-]+$/.test(subdomain) || !claims.exp) return null;
+    if (subdomain !== claimed || !claims.exp) return null;
 
     return { subdomain, exp: claims.exp };
   } catch {

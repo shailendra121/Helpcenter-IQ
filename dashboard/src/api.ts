@@ -2,6 +2,11 @@
 declare const ZAFClient: { init(): any } | undefined;
 
 const zaf = typeof ZAFClient !== "undefined" ? ZAFClient.init() : null;
+// Fixed backend URL — intentionally NOT an editable app setting, so an admin
+// can't point the app at the wrong host. When the backend URL changes
+// (e.g. a custom domain before Marketplace), update it here AND in the
+// manifest domainWhitelist.
+const BACKEND_URL = "https://helpcenteriq-backend-295420833463.asia-south1.run.app";
 
 function jsonResponse(data: unknown, status: number): Response {
   return new Response(JSON.stringify(data ?? {}), {
@@ -26,8 +31,8 @@ export async function apiFetch(
     return fetch(path, { ...init, credentials: "include" });
   }
 
-  const [md, ctx] = await Promise.all([zaf.metadata(), zaf.context()]);
-  const base = String(md.settings.backendUrl).replace(/\/$/, "");
+  const ctx = await zaf.context();
+  const base = BACKEND_URL;
 
   try {
     const data = await zaf.request({
@@ -60,8 +65,7 @@ export async function apiFetch(
 export async function getInstallUrl(): Promise<string | null> {
   if (!zaf) return null;
 
-  const [md, ctx] = await Promise.all([zaf.metadata(), zaf.context()]);
-  const base = String(md.settings.backendUrl).replace(/\/$/, "");
-
+  const ctx = await zaf.context();
+  const base = BACKEND_URL;
   return `${base}/zendesk/oauth/start?subdomain=${encodeURIComponent(ctx.account.subdomain)}`;
 }

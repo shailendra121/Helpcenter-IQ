@@ -8,7 +8,7 @@ import { verifyZafBearer } from "./auth/zafJwt.js";
 const app = express();
 
 // Runs behind the Cloud Run proxy.
-app.set("trust proxy", true);
+app.set("trust proxy", 1);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -32,8 +32,8 @@ app.get("/health", (_req, res) => {
 });
 
 // Proves a Zendesk-signed request reaches the backend (no database needed).
-app.get("/api/zaf/ping", (req, res) => {
-  const claims = verifyZafBearer(req);
+app.get("/api/zaf/ping", async (req, res) => {
+  const claims = await verifyZafBearer(req);
 
   if (!claims) {
     return res.status(401).json({ error: "Invalid ZAF JWT" });
@@ -42,7 +42,6 @@ app.get("/api/zaf/ping", (req, res) => {
   return res.json({
     ok: true,
     subdomain: claims.subdomain,
-    database_configured: Boolean(process.env.DATABASE_URL),
   });
 });
 

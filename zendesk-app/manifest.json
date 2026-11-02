@@ -9,22 +9,15 @@
   "location": {
     "support": {
       "nav_bar": {
-        "url": "assets/iframe.html",
+        "url": "assets/dashboard/iframe.html",
         "flexible": true
       }
     }
   },
   "domainWhitelist": [
-    "https://helpcenteriq-backend-295420833463.asia-south1.run.app"
+    "helpcenteriq-backend-295420833463.asia-south1.run.app"
   ],
   "parameters": [
-    {
-      "name": "backendUrl",
-      "type": "text",
-      "required": true,
-      "secure": false,
-      "default": "https://helpcenteriq-backend-295420833463.asia-south1.run.app"
-    },
     {
       "name": "jwt_secret",
       "type": "text",

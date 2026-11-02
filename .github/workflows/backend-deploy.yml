@@ -36,7 +36,7 @@ jobs:
     env:
       IMAGE: ${{ vars.GCP_REGION || 'asia-south1' }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/helpcenteriq/backend:${{ github.sha }}
       RUNTIME_SA: helpcenteriq-runtime@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
-      ENVVARS: NODE_ENV=production,AI_PROVIDER=gemini,APP_ORIGIN=${{ vars.APP_ORIGIN }}
+      ENVVARS: NODE_ENV=production,AI_PROVIDER=gemini,APP_ORIGIN=${{ vars.APP_ORIGIN }},GCP_PROJECT_ID=${{ vars.GCP_PROJECT_ID }},GCP_REGION=${{ vars.GCP_REGION || 'asia-south1' }}
       # Private-IP database (e.g. Cloud SQL with Private Service Connect): Cloud Run reaches it
       # over TCP through Direct VPC egress. Set both repo variables VPC_NETWORK and VPC_SUBNET
       # (the subnet must be in REGION) and use the private IP in DATABASE_URL.
@@ -114,3 +114,15 @@ jobs:
             --command node --args dist/jobs/runWorkerOnce.js \
             --memory 1Gi --task-timeout 3600 --max-retries 0 \
             --tasks 1 --parallelism 1
+
+      - name: Ensure worker schedule (Cloud Scheduler)
+        run: |
+          SCHED_URI="https://$REGION-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${{ vars.GCP_PROJECT_ID }}/jobs/helpcenteriq-worker:run"
+          gcloud scheduler jobs create http run-worker-schedule \
+            --location "$REGION" --schedule "*/10 * * * *" \
+            --uri "$SCHED_URI" --http-method POST \
+            --oauth-service-account-email "$RUNTIME_SA" \
+          || gcloud scheduler jobs update http run-worker-schedule \
+            --location "$REGION" --schedule "*/10 * * * *" \
+            --uri "$SCHED_URI" --http-method POST \
+            --oauth-service-account-email "$RUNTIME_SA"

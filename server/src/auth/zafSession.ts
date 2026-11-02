@@ -207,7 +207,7 @@ export async function requireZafSession(
     return;
   }
 
-  const claims = verifyZafBearer(req);
+  const claims = await verifyZafBearer(req);
 
   if (!claims) {
     res.status(401).json({ error: "Invalid ZAF JWT" });

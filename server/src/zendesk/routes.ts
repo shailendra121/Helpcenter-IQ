@@ -3,6 +3,10 @@ import jwt from "jsonwebtoken";
 import { getOAuthClient } from "../auth/getOAuthClient.js";
 import { encryptToken } from "../auth/tokenEncryption.js";
 import { upsertZendeskAccount } from "../db/models/zendeskAccounts.js";
+import crypto from "crypto";
+import { setAccountZafSecret } from "../db/models/zendeskAccounts.js";
+import { setAppJwtSecret } from "./setAppJwtSecret.js";
+import { consumeOAuthState } from "../db/models/oauthState.js";
 
 const router = Router();
 
@@ -46,9 +50,11 @@ router.get("/zendesk/oauth/start", (req, res) => {
 
   // Signed, self-contained state: works across Cloud Run instances and
   // scale-to-zero (an in-memory Map would not).
-  const state = jwt.sign({ subdomain: normalized }, stateSecret(), {
-    expiresIn: "10m",
-  });
+    const state = jwt.sign(
+    { subdomain: normalized, jti: crypto.randomUUID() },
+    stateSecret(),
+    { expiresIn: "10m" },
+  );
 
   const authorizeUrl = getOAuthClient().buildAuthorizeUrl(
     normalized,
@@ -73,12 +79,18 @@ router.get("/zendesk/oauth/callback", async (req, res) => {
   let subdomain: string;
 
   try {
-    const payload = jwt.verify(state, stateSecret(), {
+        const payload = jwt.verify(state, stateSecret(), {
       algorithms: ["HS256"],
-    }) as { subdomain?: string };
+    }) as { subdomain?: string; jti?: string };
 
-    if (!payload.subdomain) {
-      throw new Error("missing subdomain");
+    if (!payload.subdomain || !payload.jti) {
+      throw new Error("missing subdomain or jti");
+    }
+
+    // One-time use: reject a replayed state (HCIQ-21).
+    const firstUse = await consumeOAuthState(payload.jti);
+    if (!firstUse) {
+      throw new Error("state already used");
     }
 
     subdomain = payload.subdomain;
@@ -106,6 +118,20 @@ router.get("/zendesk/oauth/callback", async (req, res) => {
       scope: tokens.scope,
       expiresAt: tokens.expiresAt,
     });
+
+    // Per-account ZAF signing secret (ADR: tenant isolation).
+    // Generate, store encrypted, and push into the app's jwt_secret setting
+    // so no one has to paste a shared secret by hand.
+    const zafSecret = crypto.randomBytes(32).toString("hex");
+    await setAccountZafSecret(subdomain, encryptToken(zafSecret));
+
+    try {
+      await setAppJwtSecret(subdomain, tokens.accessToken, zafSecret);
+    } catch (err) {
+      // Setting the app setting failed (e.g. permissions). The account is
+      // still connected; log and continue — the secret is stored our side.
+      console.error("Could not set jwt_secret app setting for:", subdomain);
+    }
 
     return res.send(
       `<html><body style="font-family:sans-serif;padding:24px">
