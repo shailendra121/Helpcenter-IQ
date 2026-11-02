@@ -98,6 +98,7 @@ used only by CI:
 - `roles/run.admin` — deploy Cloud Run service and jobs
 - `roles/artifactregistry.writer` — push images
 - `roles/iam.serviceAccountUser` — act as the runtime service account
+- `roles/cloudscheduler.admin` — create/update the worker's Cloud Scheduler trigger
 
 **Runtime service account** (`helpcenteriq-runtime@...`) — used by the Cloud Run
 service and jobs at runtime:
@@ -183,6 +184,10 @@ shared secret:
 Admins do not enter the secret by hand. The `jwt_secret` manifest setting is
 `secure: true` and is populated automatically after OAuth (the app must be
 reloaded once for ZAF to pick it up).
+
+> Note: after this release, any existing install must re-authorize once
+> (click Connect in the app) so its per-account `jwt_secret` is generated
+> and set. New installs get this automatically during OAuth.
 
 ### Manual deploy (without CI)
 

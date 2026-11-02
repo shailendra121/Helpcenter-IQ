@@ -50,7 +50,7 @@ router.get("/zendesk/oauth/start", (req, res) => {
 
   // Signed, self-contained state: works across Cloud Run instances and
   // scale-to-zero (an in-memory Map would not).
-    const state = jwt.sign(
+  const state = jwt.sign(
     { subdomain: normalized, jti: crypto.randomUUID() },
     stateSecret(),
     { expiresIn: "10m" },
@@ -79,7 +79,7 @@ router.get("/zendesk/oauth/callback", async (req, res) => {
   let subdomain: string;
 
   try {
-        const payload = jwt.verify(state, stateSecret(), {
+    const payload = jwt.verify(state, stateSecret(), {
       algorithms: ["HS256"],
     }) as { subdomain?: string; jti?: string };
 
@@ -119,7 +119,7 @@ router.get("/zendesk/oauth/callback", async (req, res) => {
       expiresAt: tokens.expiresAt,
     });
 
-    // Per-account ZAF signing secret (ADR: tenant isolation).
+    // Per-account ZAF signing secret (ADR-0007: tenant isolation).
     // Generate, store encrypted, and push into the app's jwt_secret setting
     // so no one has to paste a shared secret by hand.
     const zafSecret = crypto.randomBytes(32).toString("hex");
@@ -127,10 +127,15 @@ router.get("/zendesk/oauth/callback", async (req, res) => {
 
     try {
       await setAppJwtSecret(subdomain, tokens.accessToken, zafSecret);
-    } catch {
-      // Setting the app setting failed (e.g. permissions). The account is
-      // still connected; log and continue — the secret is stored our side.
-      console.error("Could not set jwt_secret app setting for:", subdomain);
+    } catch (err) {
+      // Setting the app setting failed (name mismatch, 403, etc.). The account
+      // is still connected; log the reason and continue — the secret is stored
+      // our side, and the user can retry.
+      console.error(
+        "Could not set jwt_secret app setting for:",
+        subdomain,
+        err instanceof Error ? err.message : err,
+      );
     }
 
     return res.send(
