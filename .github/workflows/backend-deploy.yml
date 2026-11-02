@@ -34,8 +34,8 @@ jobs:
       contents: read
       id-token: write # Workload Identity Federation (no stored keys)
     env:
-      IMAGE: ${{ vars.GCP_REGION || 'asia-south1' }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/helpcenter-iq/backend:${{ github.sha }}
-      RUNTIME_SA: helpcenter-runtime@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+      IMAGE: ${{ vars.GCP_REGION || 'asia-south1' }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/helpcenteriq/backend:${{ github.sha }}
+      RUNTIME_SA: helpcenteriq-runtime@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
       ENVVARS: NODE_ENV=production,AI_PROVIDER=gemini,APP_ORIGIN=${{ vars.APP_ORIGIN }}
       # Private-IP database (e.g. Cloud SQL with Private Service Connect): Cloud Run reaches it
       # over TCP through Direct VPC egress. Set both repo variables VPC_NETWORK and VPC_SUBNET
