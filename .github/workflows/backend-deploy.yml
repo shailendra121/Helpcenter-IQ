@@ -3,7 +3,10 @@ name: Backend deploy
 # Auto-deploys the backend to Google Cloud Run on every merge/push to main
 # that touches backend files. Frontend-only commits do not trigger it.
 # Everything below the tests runs against Google Cloud: Artifact Registry,
-# Cloud Run (service + job) and Google Secret Manager. Nothing local.
+# Cloud Run (service + jobs), Google Secret Manager and the Postgres database
+# whose connection string is the DATABASE_URL secret. Nothing local: localhost
+# is used only for local development and for the throwaway test database in
+# backend-tests.yml.
 on:
   push:
     branches: [main]
@@ -15,7 +18,9 @@ on:
       - ".github/workflows/backend-tests.yml"
 
 env:
-  REGION: asia-south1
+  # Must be the region of the database (and of the VPC subnet used for Direct VPC egress).
+  # Default asia-south1 (Mumbai); set the repo variable GCP_REGION to override.
+  REGION: ${{ vars.GCP_REGION || 'asia-south1' }}
 
 jobs:
   test:
@@ -29,10 +34,20 @@ jobs:
       contents: read
       id-token: write # Workload Identity Federation (no stored keys)
     env:
-      IMAGE: asia-south1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/helpcenter-iq/backend:${{ github.sha }}
+      IMAGE: ${{ vars.GCP_REGION || 'asia-south1' }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/helpcenter-iq/backend:${{ github.sha }}
       RUNTIME_SA: helpcenter-runtime@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
       ENVVARS: NODE_ENV=production,AI_PROVIDER=gemini,APP_ORIGIN=${{ vars.APP_ORIGIN }}
+      # Private-IP database (e.g. Cloud SQL with Private Service Connect): Cloud Run reaches it
+      # over TCP through Direct VPC egress. Set both repo variables VPC_NETWORK and VPC_SUBNET
+      # (the subnet must be in REGION) and use the private IP in DATABASE_URL.
+      VPC_NETWORK: ${{ vars.VPC_NETWORK }}
+      VPC_SUBNET: ${{ vars.VPC_SUBNET }}
+      # Optional: PROJECT:REGION:INSTANCE. Set the repo variable CLOUDSQL_INSTANCE
+      # only when the database is Cloud SQL and DATABASE_URL uses the
+      # /cloudsql/... unix socket. Leave it unset for any other Postgres host.
+      CLOUDSQL_INSTANCE: ${{ vars.CLOUDSQL_INSTANCE }}
       SECRETS: >-
+        DATABASE_URL=DATABASE_URL:latest,
         ZENDESK_OAUTH_CLIENT_ID=ZENDESK_OAUTH_CLIENT_ID:latest,
         ZENDESK_OAUTH_CLIENT_SECRET=ZENDESK_OAUTH_CLIENT_SECRET:latest,
         GEMINI_API_KEY=GEMINI_API_KEY:latest,
@@ -52,12 +67,30 @@ jobs:
       - name: Prepare
         run: |
           echo "S=$(echo "$SECRETS" | tr -d ' ')" >> "$GITHUB_ENV"
-          gcloud auth configure-docker asia-south1-docker.pkg.dev --quiet
+          if [ -n "$VPC_NETWORK" ] && [ -n "$VPC_SUBNET" ]; then
+            echo "VPC_FLAG=--network=$VPC_NETWORK --subnet=$VPC_SUBNET --vpc-egress=private-ranges-only" >> "$GITHUB_ENV"
+          fi
+          if [ -n "$CLOUDSQL_INSTANCE" ]; then
+            echo "SQL_FLAG=--set-cloudsql-instances=$CLOUDSQL_INSTANCE" >> "$GITHUB_ENV"
+          fi
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
 
       - name: Build and push image
         run: |
           docker build -f server/Dockerfile -t "$IMAGE" .
           docker push "$IMAGE"
+
+      - name: Run DB migrations (Cloud Run Job)
+        run: |
+          gcloud run jobs deploy helpcenteriq-migrate \
+            --image "$IMAGE" --region "$REGION" \
+            --service-account "$RUNTIME_SA" \
+            $SQL_FLAG $VPC_FLAG \
+            --set-secrets DATABASE_URL=DATABASE_URL:latest \
+            --command /app/node_modules/.bin/node-pg-migrate \
+            --args="up,-m,src/db/migrations" \
+            --max-retries 0 --task-timeout 600
+          gcloud run jobs execute helpcenteriq-migrate --region "$REGION" --wait
 
       - name: Deploy API (Cloud Run service)
         run: |
@@ -66,6 +99,7 @@ jobs:
             --service-account "$RUNTIME_SA" \
             --allow-unauthenticated \
             --min-instances 0 --max-instances 3 \
+            $SQL_FLAG $VPC_FLAG \
             --set-secrets "$S" \
             --set-env-vars "$ENVVARS"
 
@@ -74,6 +108,7 @@ jobs:
           gcloud run jobs deploy helpcenteriq-worker \
             --image "$IMAGE" --region "$REGION" \
             --service-account "$RUNTIME_SA" \
+            $SQL_FLAG $VPC_FLAG \
             --set-secrets "$S" \
             --set-env-vars "$ENVVARS" \
             --command node --args dist/jobs/runWorkerOnce.js \

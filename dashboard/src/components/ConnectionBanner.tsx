@@ -11,6 +11,7 @@ export default function ConnectionBanner() {
           setText(`Backend check failed (HTTP ${response.status})`);
           return;
         }
+
         const data = (await response.json()) as { subdomain: string };
         setText(`Backend connected (Zendesk account: ${data.subdomain})`);
       })

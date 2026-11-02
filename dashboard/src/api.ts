@@ -12,11 +12,14 @@ function jsonResponse(data: unknown, status: number): Response {
 
 /**
  * Drop-in replacement for fetch() for backend calls.
- * Inside Zendesk: ZAF client.request with a ZAF-signed HS256 JWT.
- * Outside Zendesk (local dev, tests): plain fetch with cookies.
+ *
+ * Inside Zendesk (packaged app): goes through the ZAF client with a
+ * ZAF-signed HS256 JWT, so the backend can verify the calling Zendesk
+ * account. Outside Zendesk (local dev, unit tests): plain fetch with
+ * cookies.
  */
 export async function apiFetch(
-    path: string,
+  path: string,
   init: RequestInit = {},
 ): Promise<Response> {
   if (!zaf) {
@@ -43,8 +46,22 @@ export async function apiFetch(
         claims: { subdomain: ctx.account.subdomain },
       },
     });
+
     return jsonResponse(data, 200);
   } catch (err: any) {
     return jsonResponse(err?.responseJSON, err?.status ?? 500);
   }
+}
+
+/**
+ * URL that starts the Zendesk OAuth install flow for the current account.
+ * Opened in a new tab (Zendesk's authorize screen cannot load in the iframe).
+ */
+export async function getInstallUrl(): Promise<string | null> {
+  if (!zaf) return null;
+
+  const [md, ctx] = await Promise.all([zaf.metadata(), zaf.context()]);
+  const base = String(md.settings.backendUrl).replace(/\/$/, "");
+
+  return `${base}/zendesk/oauth/start?subdomain=${encodeURIComponent(ctx.account.subdomain)}`;
 }

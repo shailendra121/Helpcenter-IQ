@@ -2,7 +2,7 @@
   "name": "@helpcenteriq/dashboard",
   "version": "0.1.0",
   "private": true,
-  "description": "HelpCenterIQ dashboard UI, served by server/ and rendered inside the ZAF iframe.",
+  "description": "HelpCenterIQ dashboard UI, built into the Zendesk app package (zendesk-app/assets).",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

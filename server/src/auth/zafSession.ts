@@ -3,7 +3,6 @@ import type { NextFunction, Request, Response } from "express";
 import { verifyZafBearer } from "./zafJwt.js";
 import { findZendeskAccountBySubdomain } from "../db/models/zendeskAccounts.js";
 
-
 const COOKIE_NAME = "hciq_zaf_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 8; // 8 hours
 
@@ -191,7 +190,8 @@ function requireZafCookieSession(
     });
   }
 }
- /**
+
+/**
  * Production path: Bearer ZAF JWT from the packaged Zendesk app.
  * The cookie path above is kept only as a local-dev / test fallback.
  */

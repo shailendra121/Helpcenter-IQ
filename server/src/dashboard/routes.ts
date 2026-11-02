@@ -235,7 +235,6 @@ router.get("/gaps", async (rawReq, res) => {
  */
 router.get("/summary", async (rawReq, res) => {
   const req = rawReq as unknown as AuthenticatedZafRequest;
-
   try {
     const accountId = req.zafSession.zendeskAccountId;
 

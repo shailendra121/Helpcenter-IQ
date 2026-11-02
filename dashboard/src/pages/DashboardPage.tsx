@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../api";
+import InstallPrompt from "../components/InstallPrompt";
 import {
   draftToHtml,
   draftToMarkdown,
@@ -281,6 +282,9 @@ export default function DashboardPage() {
   const [gapsError, setGapsError] =
   useState("");
 
+  // True when this Zendesk account has not completed the OAuth install yet.
+  const [notInstalled, setNotInstalled] = useState(false);
+
   /*
    * Fetch the authenticated Zendesk tenant represented
    * by the signed ZAF dashboard session.
@@ -289,6 +293,10 @@ export default function DashboardPage() {
     useCallback(async () => {
       const response = await apiFetch(
         "/api/dashboard/session");
+
+      if (response.status === 404) {
+        throw new Error("not_installed");
+      }
 
       if (!response.ok) {
         throw new Error(
@@ -722,13 +730,21 @@ useEffect(() => {
       setLoading(true);
       setError("");
 
+      // Verify the account first: if it has not installed the app yet,
+      // show the "Connect Zendesk" screen instead of failing every request.
+      await fetchDashboardSession();
+
       await Promise.all([
-        fetchDashboardSession(),
         fetchSummary(),
         fetchLatestRun(),
         fetchDrafts(),
      ]);
     } catch (err) {
+      if (err instanceof Error && err.message === "not_installed") {
+        setNotInstalled(true);
+        return;
+      }
+
       setError(
         err instanceof Error
           ? err.message
@@ -1017,6 +1033,10 @@ useEffect(() => {
         setGeneratingDraft(false);
       }
     };
+
+  if (notInstalled) {
+    return <InstallPrompt />;
+  }
 
   return (
     <main

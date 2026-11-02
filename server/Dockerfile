@@ -15,5 +15,6 @@ COPY server/package.json server/
 COPY dashboard/package.json dashboard/
 RUN npm ci --workspace=server --include-workspace-root --omit=dev
 COPY --from=build /app/server/dist server/dist
+COPY server/src/db/migrations server/src/db/migrations
 WORKDIR /app/server
 CMD ["node", "dist/index.js"]

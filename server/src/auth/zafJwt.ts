@@ -8,7 +8,7 @@ export interface ZafBearerClaims {
 
 /**
  * Verifies the ZAF-signed HS256 JWT sent by the packaged Zendesk app
- * (Authorization: Bearer ...). Returns null if missing/invalid.
+ * (Authorization: Bearer ...). Returns null if missing or invalid.
  * Does not touch the database.
  */
 export function verifyZafBearer(req: Request): ZafBearerClaims | null {
@@ -20,7 +20,7 @@ export function verifyZafBearer(req: Request): ZafBearerClaims | null {
 
   try {
     const claims = jwt.verify(token, secret, {
-        algorithms: ["HS256"],
+      algorithms: ["HS256"],
     }) as jwt.JwtPayload;
 
     const subdomain = String(claims.subdomain ?? "").toLowerCase();

@@ -8,19 +8,31 @@ const router = Router();
 
 function stateSecret(): string {
   const secret = process.env.ZAF_SESSION_SECRET;
+
   if (!secret || secret.length < 32) {
     throw new Error("ZAF_SESSION_SECRET must be at least 32 characters");
   }
+
   return secret;
 }
-// Must exactly match the redirect URL registered in the Zendesk OAuth client.
+
+// Must exactly match the redirect URL registered in the Zendesk OAuth
+// client (ADR-0004). Taken from APP_ORIGIN so it is correct behind the
+// Cloud Run proxy.
 function getRedirectUri(): string {
   const origin = process.env.APP_ORIGIN;
-  if (!origin) throw new Error("APP_ORIGIN is not set");
+
+  if (!origin) {
+    throw new Error("APP_ORIGIN is not set");
+  }
+
   return `${new URL(origin).origin}/zendesk/oauth/callback`;
 }
 
-/** Step 1: send the installer to Zendesk's authorize screen. */
+/**
+ * Step 1 of the OAuth handshake: redirect the installer to Zendesk's
+ * authorize screen. Opened in a new tab by the packaged Zendesk app.
+ */
 router.get("/zendesk/oauth/start", (req, res) => {
   const subdomain = req.query.subdomain;
 
@@ -32,10 +44,12 @@ router.get("/zendesk/oauth/start", (req, res) => {
 
   const normalized = subdomain.toLowerCase();
 
-  // Signed, self-contained state: works across Cloud Run instances.
+  // Signed, self-contained state: works across Cloud Run instances and
+  // scale-to-zero (an in-memory Map would not).
   const state = jwt.sign({ subdomain: normalized }, stateSecret(), {
     expiresIn: "10m",
   });
+
   const authorizeUrl = getOAuthClient().buildAuthorizeUrl(
     normalized,
     getRedirectUri(),
@@ -45,24 +59,35 @@ router.get("/zendesk/oauth/start", (req, res) => {
   return res.redirect(authorizeUrl);
 });
 
-/** Step 2: exchange the code for tokens, store them encrypted. */
+/**
+ * Step 2: Zendesk redirects back here with an authorization code.
+ * Exchanges it for tokens and stores them encrypted.
+ */
 router.get("/zendesk/oauth/callback", async (req, res) => {
   const { code, state } = req.query;
 
   if (typeof code !== "string" || typeof state !== "string") {
     return res.status(400).send("Missing code or state parameter.");
   }
-let subdomain: string;
+
+  let subdomain: string;
+
   try {
     const payload = jwt.verify(state, stateSecret(), {
       algorithms: ["HS256"],
     }) as { subdomain?: string };
-    if (!payload.subdomain) throw new Error("missing subdomain");
+
+    if (!payload.subdomain) {
+      throw new Error("missing subdomain");
+    }
+
     subdomain = payload.subdomain;
   } catch {
     return res
       .status(400)
-      .send("Invalid or expired authorization request. Please try installing again.");
+      .send(
+        "Invalid or expired authorization request. Please try installing again.",
+      );
   }
 
   try {
@@ -89,12 +114,14 @@ let subdomain: string;
       </body></html>`,
     );
   } catch {
-    // Never log the raw error: it may contain token data.
+    // Never log/return the raw error, which could contain token data
+    // from a failed exchange response.
     console.error("OAuth token exchange failed for subdomain:", subdomain);
+
     return res
       .status(502)
       .send("Failed to complete Zendesk authorization. Please try again.");
   }
-  });
+});
 
 export default router;

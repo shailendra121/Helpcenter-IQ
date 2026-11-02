@@ -7,7 +7,7 @@ import { verifyZafBearer } from "./auth/zafJwt.js";
 
 const app = express();
 
-// Cloud Run proxy ke peeche hai
+// Runs behind the Cloud Run proxy.
 app.set("trust proxy", true);
 
 app.use(express.json());
@@ -16,13 +16,22 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/api/analysis-runs", analysisRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 
+app.get("/", (_req, res) => {
+  res.status(200).json({
+    status: "ok",
+    service: "helpcenteriq-server",
+    message: "HelpCenter-IQ Backend is running successfully"
+  });
+});
+
 app.get("/health", (_req, res) => {
   res.status(200).json({
     status: "ok",
     service: "helpcenteriq-server",
   });
 });
-// Proves a Zendesk-signed request reaches the backend (no DB needed).
+
+// Proves a Zendesk-signed request reaches the backend (no database needed).
 app.get("/api/zaf/ping", (req, res) => {
   const claims = verifyZafBearer(req);
 

@@ -16,20 +16,26 @@ describe("GET /api/zaf/ping", () => {
   });
 
   it("rejects a token signed with the wrong secret", async () => {
-    const token = jwt.sign({ subdomain: "acme" }, "wrong-secret-wrong-secret-wrong-secret", {
-      expiresIn: 300,
-    });
+    const token = jwt.sign(
+      { subdomain: "acme" },
+      "wrong-secret-wrong-secret-wrong-secret",
+      { expiresIn: 300 },
+    );
+
     const res = await request(app)
       .get("/api/zaf/ping")
       .set("Authorization", `Bearer ${token}`);
+
     expect(res.status).toBe(401);
   });
 
   it("accepts a valid ZAF-signed token and returns the subdomain", async () => {
     const token = jwt.sign({ subdomain: "Acme" }, SECRET, { expiresIn: 300 });
+
     const res = await request(app)
       .get("/api/zaf/ping")
       .set("Authorization", `Bearer ${token}`);
+
     expect(res.status).toBe(200);
     expect(res.body.subdomain).toBe("acme");
   });

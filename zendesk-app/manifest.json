@@ -15,9 +15,9 @@
     }
   },
   "domainWhitelist": [
-    "helpcenteriq-backend-295420833463.asia-south1.run.app"
+    "https://helpcenteriq-backend-295420833463.asia-south1.run.app"
   ],
-    "parameters": [
+  "parameters": [
     {
       "name": "backendUrl",
       "type": "text",
