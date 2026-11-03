@@ -43,7 +43,6 @@ jobs:
         run: |
           echo "TOKEN_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
           echo "ZAF_SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
-          echo "ZAF_JWT_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
       - name: Install dependencies
         working-directory: .
         run: npm ci

@@ -52,8 +52,7 @@ jobs:
         ZENDESK_OAUTH_CLIENT_SECRET=ZENDESK_OAUTH_CLIENT_SECRET:latest,
         GEMINI_API_KEY=GEMINI_API_KEY:latest,
         TOKEN_ENCRYPTION_KEY=TOKEN_ENCRYPTION_KEY:latest,
-        ZAF_SESSION_SECRET=ZAF_SESSION_SECRET:latest,
-        ZAF_JWT_SECRET=ZAF_JWT_SECRET:latest
+        ZAF_SESSION_SECRET=ZAF_SESSION_SECRET:latest
     steps:
       - uses: actions/checkout@v4
 

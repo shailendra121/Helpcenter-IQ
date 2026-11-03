@@ -29,12 +29,20 @@ export async function triggerWorkerJob(): Promise<void> {
   const token = await getAccessToken();
   if (!token) return;
 
-  try {
-    await fetch(
+    try {
+    const res = await fetch(
       `https://${region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${project}/jobs/${job}:run`,
       { method: "POST", headers: { Authorization: `Bearer ${token}` } },
     );
-  } catch {
-    // best-effort; the scheduler will still pick the run up
+    if (!res.ok) {
+      console.error(
+        `triggerWorkerJob: ${job}:run returned ${res.status} — the run will wait for the next schedule`,
+      );
+    }
+  } catch (err) {
+    console.error(
+      "triggerWorkerJob failed; the scheduler will pick the run up:",
+      err instanceof Error ? err.message : err,
+    );
   }
 }

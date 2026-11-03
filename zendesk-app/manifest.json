@@ -21,7 +21,7 @@
     {
       "name": "jwt_secret",
       "type": "text",
-      "required": true,
+      "required": false,
       "secure": true
     }
   ],

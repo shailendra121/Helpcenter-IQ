@@ -15,17 +15,18 @@ export async function verifyZafBearer(
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
   if (!token) return null;
 
+  // Read the claimed subdomain WITHOUT trusting it yet.
+  const decoded = jwt.decode(token) as jwt.JwtPayload | null;
+  const claimed = String(decoded?.subdomain ?? "").toLowerCase();
+  if (!/^[a-z0-9-]+$/.test(claimed)) return null;
+
+  // DB lookup is OUTSIDE the try/catch: if the database is down, the error
+  // propagates so the caller can return 503 (an outage, not an auth failure).
+  const enc = await getAccountZafSecret(claimed);
+  if (!enc) return null;
+
+  // Only token verification itself fails "closed" as a 401.
   try {
-    // 1. Read the claimed subdomain WITHOUT trusting it yet.
-    const decoded = jwt.decode(token) as jwt.JwtPayload | null;
-    const claimed = String(decoded?.subdomain ?? "").toLowerCase();
-    if (!/^[a-z0-9-]+$/.test(claimed)) return null;
-
-    // 2. Look up THAT account's own secret
-    const enc = await getAccountZafSecret(claimed);
-    if (!enc) return null;
-
-    // 3. Verify the token against the account's own secret
     const claims = jwt.verify(token, decryptToken(enc), {
       algorithms: ["HS256"],
     }) as jwt.JwtPayload;

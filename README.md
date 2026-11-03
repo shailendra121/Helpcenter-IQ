@@ -109,7 +109,7 @@ service and jobs at runtime:
 
 Secrets used at runtime: `DATABASE_URL`, `ZENDESK_OAUTH_CLIENT_ID`,
 `ZENDESK_OAUTH_CLIENT_SECRET`, `GEMINI_API_KEY`, `TOKEN_ENCRYPTION_KEY`,
-`ZAF_SESSION_SECRET`, `ZAF_JWT_SECRET`.
+`ZAF_SESSION_SECRET`.
 
 **Add a new secret:**
 
@@ -159,7 +159,7 @@ Setup (one-time, already provisioned):
 `DATABASE_URL` therefore uses the PSC internal IP and requires SSL:
 
 ```
-postgresql://USER:PASSWORD@<PSC_INTERNAL_IP>:5432/helpcenteriq?sslmode=no-verify
+postgresql://USER:PASSWORD@<PSC_INTERNAL_IP>:5432/helpcenteriq?sslmode=require
 ```
 
 Migrations run automatically as a Cloud Run Job (`helpcenteriq-migrate`) on each

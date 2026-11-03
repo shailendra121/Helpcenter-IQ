@@ -128,14 +128,24 @@ router.get("/zendesk/oauth/callback", async (req, res) => {
     try {
       await setAppJwtSecret(subdomain, tokens.accessToken, zafSecret);
     } catch (err) {
-      // Setting the app setting failed (name mismatch, 403, etc.). The account
-      // is still connected; log the reason and continue — the secret is stored
-      // our side, and the user can retry.
       console.error(
         "Could not set jwt_secret app setting for:",
         subdomain,
         err instanceof Error ? err.message : err,
       );
+
+      // The account is connected, but the app can't authenticate until its
+      // jwt_secret is set. Don't show success — tell the user to retry.
+      return res
+        .status(502)
+        .send(
+          `<html><body style="font-family:sans-serif;padding:24px">
+            <h3>Almost there — setup didn't finish.</h3>
+            <p>We connected your Zendesk account but couldn't finish configuring
+            the app. Please try connecting again. If this keeps happening,
+            contact support@helpcenteriq.com.</p>
+          </body></html>`,
+        );
     }
 
     return res.send(
