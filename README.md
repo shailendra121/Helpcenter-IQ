@@ -148,9 +148,9 @@ Setup (one-time, already provisioned):
 
 - The instance has PSC enabled and the consumer project (`helpcenter-iq`) in its
   allowed-projects list.
-- A PSC endpoint exposes the instance at an internal IP (e.g. `10.142.0.2`) on the
-  `default` VPC network, with **global access** enabled so Cloud Run in
-  `asia-south1` can reach it cross-region.
+- A PSC endpoint exposes the instance at an internal IP (e.g. `10.160.0.6`) on the
+  `default` VPC network, so Cloud Run in `asia-south1` can reach it over the
+  `default` VPC.
 - Cloud Run connects via **Direct VPC egress**
   (`--network=default --subnet=default --vpc-egress=private-ranges-only`), using
   that internal IP.
