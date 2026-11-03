@@ -108,4 +108,29 @@ describe("ZAF Bearer JWT authentication on dashboard API", () => {
     expect(res.status).not.toBe(403);
     expect(res.status).not.toBe(401);
   });
+    it("returns 503 when the secret lookup (getAccountZafSecret) fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // The DB fails during the per-account secret lookup (not the account lookup).
+    mockGetSecret.mockRejectedValue(new Error("connect ECONNREFUSED"));
+
+    const res = await request(app)
+      .get("/api/dashboard/session")
+      .set("Authorization", bearer("acme"));
+
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe("database_unavailable");
+    errorSpy.mockRestore();
+  });
+
+  it("returns 404 not_installed when the account has no stored secret yet", async () => {
+    // Account hasn't completed OAuth, so there is no per-account secret.
+    mockGetSecret.mockResolvedValue(null as never);
+
+    const res = await request(app)
+      .get("/api/dashboard/session")
+      .set("Authorization", bearer("newcomer"));
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("not_installed");
+  });
 });

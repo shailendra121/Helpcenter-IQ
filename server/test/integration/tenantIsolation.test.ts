@@ -30,8 +30,9 @@ describe("tenant isolation", () => {
       expiresIn: 300,
     });
 
-    const claims = await verifyZafBearer(reqWith(token));
-    expect(claims?.subdomain).toBe("account-a");
+    const result = await verifyZafBearer(reqWith(token));
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.claims.subdomain).toBe("account-a");
   });
 
   it("rejects a token from account A claiming to be account B", async () => {
@@ -43,7 +44,7 @@ describe("tenant isolation", () => {
       expiresIn: 300,
     });
 
-    const claims = await verifyZafBearer(reqWith(forged));
-    expect(claims).toBeNull();
+    const result = await verifyZafBearer(reqWith(forged));
+    expect(result.ok).toBe(false);
   });
 });

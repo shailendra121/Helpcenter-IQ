@@ -31,18 +31,22 @@ app.get("/health", (_req, res) => {
   });
 });
 
-// Proves a Zendesk-signed request reaches the backend (no database needed).
 app.get("/api/zaf/ping", async (req, res) => {
-  const claims = await verifyZafBearer(req);
+  let result;
+  try {
+    result = await verifyZafBearer(req);
+  } catch {
+    return res.status(503).json({ error: "database_unavailable" });
+  }
 
-  if (!claims) {
+  if (!result.ok) {
+    if (result.reason === "not_installed") {
+      return res.status(404).json({ error: "not_installed" });
+    }
     return res.status(401).json({ error: "Invalid ZAF JWT" });
   }
 
-  return res.json({
-    ok: true,
-    subdomain: claims.subdomain,
-  });
+  return res.json({ ok: true, subdomain: result.claims.subdomain });
 });
 
 app.use(zendeskRoutes);

@@ -11,7 +11,6 @@ reduce repeat tickets.
 
 ## Repo layout
 
-```
 zendesk-app/   Zendesk Apps Framework (ZAF) package — manifest, thin iframe shell.
                 Submitted to the Zendesk Marketplace as a server-side app.
 server/        Backend — API, Zendesk integration, AI pipeline, jobs, DB.
@@ -43,9 +42,8 @@ See `docs/SETUP.md`.
 
 ## Deployment (Google Cloud)
 
-HelpCenterIQ runs on Google Cloud. The backend is in `asia-south1` (Mumbai); the
-database is Cloud SQL in `us-east1`, reached cross-region over Private Service
-Connect.
+HelpCenterIQ runs on Google Cloud. The backend and the Cloud SQL database are
+both in `asia-south1` (Mumbai), connected over Private Service Connect.
 
 - **Backend API** — a Cloud Run service (`helpcenteriq-backend`) with a public
   HTTPS URL. `min-instances` is 0 to keep idle cost near zero.
@@ -102,8 +100,9 @@ used only by CI:
 
 **Runtime service account** (`helpcenteriq-runtime@...`) — used by the Cloud Run
 service and jobs at runtime:
-
 - `roles/secretmanager.secretAccessor` — read the secrets it needs
+- `roles/run.invoker` on `helpcenteriq-worker` — run the worker job (Cloud
+  Scheduler trigger and the "start the worker now" call)
 
 ### Secrets (Secret Manager)
 
@@ -142,7 +141,7 @@ next deploy/update — never commit secret values to the repo.
 ### Database: Cloud SQL + Private Service Connect
 
 The database is Cloud SQL for PostgreSQL (with the `pgvector` extension) in
-`us-east1`, reachable only over **Private Service Connect (PSC)** — it has no
+`asia-south1`, reachable only over **Private Service Connect (PSC)** — it has no
 public IP.
 
 Setup (one-time, already provisioned):

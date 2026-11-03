@@ -29,7 +29,7 @@ export async function triggerWorkerJob(): Promise<void> {
   const token = await getAccessToken();
   if (!token) return;
 
-    try {
+  try {
     const res = await fetch(
       `https://${region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${project}/jobs/${job}:run`,
       { method: "POST", headers: { Authorization: `Bearer ${token}` } },

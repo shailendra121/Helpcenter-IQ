@@ -207,16 +207,28 @@ export async function requireZafSession(
     return;
   }
 
-  const claims = await verifyZafBearer(req);
+      let result;
+  try {
+    result = await verifyZafBearer(req);
+  } catch (error) {
+    console.error("[zaf-session] secret lookup failed:", error);
+    res.status(503).json({ error: "database_unavailable" });
+    return;
+  }
 
-  if (!claims) {
+  if (!result.ok) {
+    if (result.reason === "not_installed") {
+      res.status(404).json({ error: "not_installed" });
+      return;
+    }
     res.status(401).json({ error: "Invalid ZAF JWT" });
     return;
   }
 
+  const claims = result.claims;
+
   try {
     const account = await findZendeskAccountBySubdomain(claims.subdomain);
-
     if (!account) {
       res
         .status(404)
