@@ -69,7 +69,7 @@ afterEach(() => {
 
     expect(result.ticketCount).toBe(2);
     expect(mockUpsertTicket).toHaveBeenCalledTimes(2);
-    expect(mockCompleteAnalysisRun).toHaveBeenCalledWith(1);
+    expect(mockCompleteAnalysisRun).toHaveBeenCalledWith(1, 1);
     expect(mockFailAnalysisRun).not.toHaveBeenCalled();
   });
 
@@ -104,7 +104,7 @@ afterEach(() => {
     mockFetchTicketPage.mockRejectedValue(new Error("Zendesk API down"));
 
     await expect(ingestTickets(1, "d3v-astonous", 30)).rejects.toThrow("Zendesk API down");
-    expect(mockFailAnalysisRun).toHaveBeenCalledWith(2);
+    expect(mockFailAnalysisRun).toHaveBeenCalledWith(2, 1);
     expect(mockCompleteAnalysisRun).not.toHaveBeenCalled();
   });
 

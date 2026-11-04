@@ -1,16 +1,11 @@
 /**
  * Writes the per-account ZAF secret into this account's HelpCenterIQ app
  * installation (the `jwt_secret` secure setting), using the account's OAuth
- * access token. Admin-level token required (installs are admin-only).
- *
- * Matches the installation by app_id (stable, Zendesk-managed) rather than by
- * the editable install "Title", so it doesn't break if an admin renames it.
- *
- * Note: ZAF caches secure settings, so the setting takes effect only after the
- * user reloads the app — which the OAuth success page already asks for.
+ * access token. Matches the installation directly by its settings.name,
+ * because a zcli/dev install does not reliably appear in /api/v2/apps.json.
  */
 
-const APP_NAME = "HelpCenterIQ"; // must match the app's manifest "name"
+const APP_NAME = "HelpCenterIQ"; // matches settings.name on the installation
 
 async function zendeskGet(subdomain: string, accessToken: string, path: string) {
   const res = await fetch(`https://${subdomain}.zendesk.com${path}`, {
@@ -27,31 +22,21 @@ export async function setAppJwtSecret(
   accessToken: string,
   jwtSecret: string,
 ): Promise<void> {
-  // 1. Find OUR app's id by its manifest name (not the editable install Title).
-  const apps = (await zendeskGet(
-    subdomain,
-    accessToken,
-    "/api/v2/apps.json",
-  )) as { apps: Array<{ id: number; name: string }> };
-
-  const app = apps.apps.find((a) => a.name === APP_NAME);
-  if (!app) {
-    throw new Error(`App "${APP_NAME}" not found for ${subdomain}`);
-  }
-
-  // 2. Find THIS app's installation by app_id (admins can't change app_id).
   const data = (await zendeskGet(
     subdomain,
     accessToken,
     "/api/v2/apps/installations.json",
-  )) as { installations: Array<{ id: number; app_id: number }> };
+  )) as {
+    installations: Array<{ id: number; settings?: { name?: string } }>;
+  };
 
-  const install = data.installations.find((i) => i.app_id === app.id);
+  const install = data.installations.find(
+    (i) => i.settings?.name === APP_NAME,
+  );
   if (!install) {
     throw new Error(`No installation of "${APP_NAME}" found for ${subdomain}`);
   }
 
-  // 3. Set its jwt_secret.
   const res = await fetch(
     `https://${subdomain}.zendesk.com/api/v2/apps/installations/${install.id}.json`,
     {
@@ -63,7 +48,6 @@ export async function setAppJwtSecret(
       body: JSON.stringify({ settings: { jwt_secret: jwtSecret } }),
     },
   );
-
   if (!res.ok) {
     throw new Error(`Zendesk PUT installation failed: ${res.status}`);
   }

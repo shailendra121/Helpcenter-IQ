@@ -14,8 +14,8 @@ import { runClustering } from "../clustering/runClustering.js";
 import { runGapClassification } from "../classification/runGapClassification.js";
 import { runRecommendationGeneration } from "../recommendations/runRecommendationGeneration.js";
 
-export async function runAnalysisPipeline(runId: number): Promise<void> {
-  const run = await getAnalysisRun(runId);
+export async function runAnalysisPipeline(runId: number, zendeskAccountId: number): Promise<void> {
+  const run = await getAnalysisRun(runId, zendeskAccountId);
 
   if (!run) {
     throw new Error(`Analysis run ${runId} not found`);
@@ -40,7 +40,7 @@ export async function runAnalysisPipeline(runId: number): Promise<void> {
       continue;
     }
     try{
-         await startAnalysisStage(runId, stage);
+         await startAnalysisStage(runId, zendeskAccountId, stage);
     
       switch (stage) {
         case "ticket_ingestion":
@@ -81,12 +81,12 @@ export async function runAnalysisPipeline(runId: number): Promise<void> {
           break;
       }
 
-      await completeAnalysisStage(runId, stage);
+      await completeAnalysisStage(runId, zendeskAccountId, stage);
     } catch (error) {
-      await failRunAtStage(runId, stage, error);
+      await failRunAtStage(runId, zendeskAccountId, stage, error);
       throw error;
     }
   }
 
-  await completeAnalysisRun(runId);
+  await completeAnalysisRun(runId, zendeskAccountId);
 }
