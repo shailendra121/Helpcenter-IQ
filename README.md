@@ -11,6 +11,7 @@ reduce repeat tickets.
 
 ## Repo layout
 
+​```
 zendesk-app/   Zendesk Apps Framework (ZAF) package — manifest, thin iframe shell.
                 Submitted to the Zendesk Marketplace as a server-side app.
 server/        Backend — API, Zendesk integration, AI pipeline, jobs, DB.
