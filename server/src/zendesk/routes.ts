@@ -1,62 +1,64 @@
-import { verifyZafJwt } from "./client/verifyZafJwt.js";
-import {
-  findZendeskAccountBySubdomain,
-  upsertZendeskAccount,
-} from "../db/models/zendeskAccounts.js";
-import fs from "fs";
-import path from "path";
 import { Router } from "express";
-import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import { getOAuthClient } from "../auth/getOAuthClient.js";
 import { encryptToken } from "../auth/tokenEncryption.js";
-import { setZafSessionCookie } from "../auth/zafSession.js";
-
+import { upsertZendeskAccount } from "../db/models/zendeskAccounts.js";
+import crypto from "crypto";
+import { setAccountZafSecret } from "../db/models/zendeskAccounts.js";
+import { setAppJwtSecret } from "./setAppJwtSecret.js";
+import { consumeOAuthState } from "../db/models/oauthState.js";
 
 const router = Router();
 
-// In-memory state store for CSRF protection during the OAuth handshake.
-// A real multi-instance deployment would use Redis/DB instead — fine for
-// MVP single-instance dev/trial use.
-const pendingStates = new Map<
-  string,
-  { subdomain: string; createdAt: number }
->();
+function stateSecret(): string {
+  const secret = process.env.ZAF_SESSION_SECRET;
 
-const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+  if (!secret || secret.length < 32) {
+    throw new Error("ZAF_SESSION_SECRET must be at least 32 characters");
+  }
 
-function getRedirectUri(req: import("express").Request): string {
-  // Must exactly match the redirect_uri registered with the Zendesk
-  // OAuth client, per ADR-0004 / Zendesk's OAuth error handling.
-  return `${req.protocol}://${req.get("host")}/zendesk/oauth/callback`;
+  return secret;
+}
+
+// Must exactly match the redirect URL registered in the Zendesk OAuth
+// client (ADR-0004). Taken from APP_ORIGIN so it is correct behind the
+// Cloud Run proxy.
+function getRedirectUri(): string {
+  const origin = process.env.APP_ORIGIN;
+
+  if (!origin) {
+    throw new Error("APP_ORIGIN is not set");
+  }
+
+  return `${new URL(origin).origin}/zendesk/oauth/callback`;
 }
 
 /**
  * Step 1 of the OAuth handshake: redirect the installer to Zendesk's
- * authorize screen. Triggered from the ZAF iframe's bootstrap.js redirect
- * (see zendesk-app/assets/js/bootstrap.js and HCIQ-3), or directly by an
- * admin during install.
+ * authorize screen. Opened in a new tab by the packaged Zendesk app.
  */
 router.get("/zendesk/oauth/start", (req, res) => {
   const subdomain = req.query.subdomain;
 
-  if (typeof subdomain !== "string" || !subdomain) {
+  if (typeof subdomain !== "string" || !/^[a-z0-9-]+$/i.test(subdomain)) {
     return res
       .status(400)
-      .json({ error: "Missing subdomain query parameter" });
+      .json({ error: "Missing or invalid subdomain query parameter" });
   }
 
-  const state = crypto.randomBytes(24).toString("hex");
+  const normalized = subdomain.toLowerCase();
 
-  pendingStates.set(state, {
-    subdomain,
-    createdAt: Date.now(),
-  });
+  // Signed, self-contained state: works across Cloud Run instances and
+  // scale-to-zero (an in-memory Map would not).
+  const state = jwt.sign(
+    { subdomain: normalized, jti: crypto.randomUUID() },
+    stateSecret(),
+    { expiresIn: "10m" },
+  );
 
-  const client = getOAuthClient();
-
-  const authorizeUrl = client.buildAuthorizeUrl(
-    subdomain,
-    getRedirectUri(req),
+  const authorizeUrl = getOAuthClient().buildAuthorizeUrl(
+    normalized,
+    getRedirectUri(),
     state,
   );
 
@@ -65,8 +67,7 @@ router.get("/zendesk/oauth/start", (req, res) => {
 
 /**
  * Step 2: Zendesk redirects back here with an authorization code.
- * Exchanges it for tokens, stores them encrypted, and forwards the
- * installer into the dashboard.
+ * Exchanges it for tokens and stores them encrypted.
  */
 router.get("/zendesk/oauth/callback", async (req, res) => {
   const { code, state } = req.query;
@@ -75,11 +76,25 @@ router.get("/zendesk/oauth/callback", async (req, res) => {
     return res.status(400).send("Missing code or state parameter.");
   }
 
-  const pending = pendingStates.get(state);
+  let subdomain: string;
 
-  if (!pending) {
-    // Unknown/expired/replayed state — reject rather than trust an
-    // unverified subdomain from the query string.
+  try {
+    const payload = jwt.verify(state, stateSecret(), {
+      algorithms: ["HS256"],
+    }) as { subdomain?: string; jti?: string };
+
+    if (!payload.subdomain || !payload.jti) {
+      throw new Error("missing subdomain or jti");
+    }
+
+    // One-time use: reject a replayed state (HCIQ-21).
+    const firstUse = await consumeOAuthState(payload.jti);
+    if (!firstUse) {
+      throw new Error("state already used");
+    }
+
+    subdomain = payload.subdomain;
+  } catch {
     return res
       .status(400)
       .send(
@@ -87,27 +102,15 @@ router.get("/zendesk/oauth/callback", async (req, res) => {
       );
   }
 
-  pendingStates.delete(state); // one-time use
-
-  if (Date.now() - pending.createdAt > STATE_TTL_MS) {
-    return res
-      .status(400)
-      .send(
-        "Authorization request expired. Please try installing again.",
-      );
-  }
-
   try {
-    const client = getOAuthClient();
-
-    const tokens = await client.exchangeCodeForToken(
-      pending.subdomain,
+    const tokens = await getOAuthClient().exchangeCodeForToken(
+      subdomain,
       code,
-      getRedirectUri(req),
+      getRedirectUri(),
     );
 
     await upsertZendeskAccount({
-      subdomain: pending.subdomain,
+      subdomain,
       accessTokenEncrypted: encryptToken(tokens.accessToken),
       refreshTokenEncrypted: tokens.refreshToken
         ? encryptToken(tokens.refreshToken)
@@ -116,125 +119,50 @@ router.get("/zendesk/oauth/callback", async (req, res) => {
       expiresAt: tokens.expiresAt,
     });
 
-    return res.redirect(
-      `/zaf/dashboard?origin=${encodeURIComponent(pending.subdomain)}`,
+    // Per-account ZAF signing secret (ADR-0007: tenant isolation).
+    // Generate, store encrypted, and push into the app's jwt_secret setting
+    // so no one has to paste a shared secret by hand.
+    const zafSecret = crypto.randomBytes(32).toString("hex");
+    await setAccountZafSecret(subdomain, encryptToken(zafSecret));
+
+    try {
+      await setAppJwtSecret(subdomain, tokens.accessToken, zafSecret);
+    } catch (err) {
+      console.error(
+        "Could not set jwt_secret app setting for:",
+        subdomain,
+        err instanceof Error ? err.message : err,
+      );
+
+      // The account is connected, but the app can't authenticate until its
+      // jwt_secret is set. Don't show success — tell the user to retry.
+      return res
+        .status(502)
+        .send(
+          `<html><body style="font-family:sans-serif;padding:24px">
+            <h3>Almost there — setup didn't finish.</h3>
+            <p>We connected your Zendesk account but couldn't finish configuring
+            the app. Please try connecting again. If this keeps happening,
+            contact support@helpcenteriq.com.</p>
+          </body></html>`,
+        );
+    }
+
+    return res.send(
+      `<html><body style="font-family:sans-serif;padding:24px">
+        <h3>HelpCenterIQ is connected.</h3>
+        <p>You can close this tab and reload HelpCenterIQ in Zendesk.</p>
+      </body></html>`,
     );
   } catch {
     // Never log/return the raw error, which could contain token data
     // from a failed exchange response.
-    console.error(
-      "OAuth token exchange failed for subdomain:",
-      pending.subdomain,
-    );
+    console.error("OAuth token exchange failed for subdomain:", subdomain);
 
     return res
       .status(502)
-      .send(
-        "Failed to complete Zendesk authorization. Please try again.",
-      );
+      .send("Failed to complete Zendesk authorization. Please try again.");
   }
 });
-
-/**
- * Serves the dashboard shell inside the ZAF iframe. Two request shapes
- * are supported, per the architecture established in HCIQ-3:
- *
- * 1. POST with a `token` field (signedUrls:true's real JWT flow) — only
- *    triggers once the app is hosted at a real public URL (post-HCIQ-18
- *    Marketplace publish); verified via verifyZafJwt().
- * 2. GET with `origin`/`app_guid` query params — the local zcli
- *    apps:server dev/trial flow from bootstrap.js (see HCIQ-3). This
- *    path is NOT cryptographically verified (zcli's local override
- *    doesn't sign requests), so it only ever serves the unauthenticated
- *    "please install" state, never account data. Flagged on HCIQ-7 for
- *    review — full JWT enforcement on this path isn't possible until
- *    the app is Marketplace-published.
- */
-router.post("/zaf/dashboard", async (req, res) => {
-  const token = req.body?.token;
-
-  if (typeof token !== "string" || !token) {
-    return res.status(401).send("Missing ZAF signature.");
-  }
-
-  const publicKeyPath = process.env.ZAF_APP_PUBLIC_KEY_PATH;
-
-  if (!publicKeyPath) {
-    console.error("ZAF_APP_PUBLIC_KEY_PATH is not set");
-    return res.status(500).send("Server misconfiguration.");
-  }
-
-  let claims: { iss?: string; aud?: string };
-
-  try {
-    const publicKeyPem = fs.readFileSync(publicKeyPath, "utf8");
-
-    const installationId =
-      process.env.ZENDESK_MARKETPLACE_APP_ID ?? "";
-
-    claims = verifyZafJwt(
-      token,
-      publicKeyPem,
-      installationId,
-    ) as typeof claims;
-  } catch {
-    console.error("ZAF JWT verification failed");
-    return res.status(401).send("Invalid signature.");
-  }
-
-  const subdomain = claims.iss
-    ?.replace(/\.zendesk\.com$/, "");
-
-  if (!subdomain) {
-    return res.status(401).send("Invalid token claims.");
-  }
-
-  return serveDashboardFor(subdomain, res, true);
-});
-
-router.get("/zaf/dashboard", async (req, res) => {
-  const { origin } = req.query;
-
-  if (typeof origin !== "string" || !origin) {
-    return res.status(400).send("Missing origin parameter.");
-  }
-
-  const subdomain = origin
-    .replace(/^https?:\/\//, "")
-    .replace(/\.zendesk\.com$/, "");
-
-  return serveDashboardFor(subdomain, res, false);
-});
-async function serveDashboardFor(
-  subdomain: string,
-  res: import("express").Response,
-  authenticated = false,
-) {
-  const account =
-    await findZendeskAccountBySubdomain(subdomain);
-
-  if (!account) {
-    return res.send(
-      `<html><body><p>HelpCenterIQ isn't installed for this account yet.</p>
-       <a href="/zendesk/oauth/start?subdomain=${encodeURIComponent(subdomain)}">Install now</a>
-       </body></html>`,
-    );
-  }
-
-  if (authenticated) {
-    setZafSessionCookie(
-      res,
-      account.id,
-      account.subdomain,
-    );
-  }
-
-  return res.sendFile(
-  path.resolve(
-    process.cwd(),
-    "../dashboard/dist/index.html",
-  ),
-);
-}
 
 export default router;

@@ -1,5 +1,7 @@
 import crypto from "crypto";
 import type { NextFunction, Request, Response } from "express";
+import { verifyZafBearer } from "./zafJwt.js";
+import { findZendeskAccountBySubdomain } from "../db/models/zendeskAccounts.js";
 
 const COOKIE_NAME = "hciq_zaf_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 8; // 8 hours
@@ -14,9 +16,7 @@ function getSecret(): string {
   const secret = process.env.ZAF_SESSION_SECRET;
 
   if (!secret || secret.length < 32) {
-    throw new Error(
-      "ZAF_SESSION_SECRET must be set to at least 32 characters",
-    );
+    throw new Error("ZAF_SESSION_SECRET must be set to at least 32 characters");
   }
 
   return secret;
@@ -44,9 +44,7 @@ export function createZafSessionToken(
   const session: ZafSession = {
     zendeskAccountId,
     subdomain,
-    exp:
-      Math.floor(Date.now() / 1000) +
-      SESSION_TTL_SECONDS,
+    exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
   };
 
   const payload = encode(JSON.stringify(session));
@@ -54,9 +52,7 @@ export function createZafSessionToken(
   return `${payload}.${sign(payload)}`;
 }
 
-export function verifyZafSessionToken(
-  token: string,
-): ZafSession | null {
+export function verifyZafSessionToken(token: string): ZafSession | null {
   const [payload, signature] = token.split(".");
 
   if (!payload || !signature) {
@@ -70,18 +66,13 @@ export function verifyZafSessionToken(
 
   if (
     actualBuffer.length !== expectedBuffer.length ||
-    !crypto.timingSafeEqual(
-      actualBuffer,
-      expectedBuffer,
-    )
+    !crypto.timingSafeEqual(actualBuffer, expectedBuffer)
   ) {
     return null;
   }
 
   try {
-    const parsed = JSON.parse(
-      decode(payload),
-    ) as Partial<ZafSession>;
+    const parsed = JSON.parse(decode(payload)) as Partial<ZafSession>;
 
     if (
       !Number.isInteger(parsed.zendeskAccountId) ||
@@ -104,10 +95,7 @@ export function setZafSessionCookie(
   zendeskAccountId: number,
   subdomain: string,
 ): void {
-  const token = createZafSessionToken(
-    zendeskAccountId,
-    subdomain,
-  );
+  const token = createZafSessionToken(zendeskAccountId, subdomain);
 
   /*
    * HelpCenterIQ runs inside a Zendesk iframe.
@@ -125,10 +113,7 @@ export function setZafSessionCookie(
   );
 }
 
-function readCookie(
-  req: Request,
-  name: string,
-): string | null {
+function readCookie(req: Request, name: string): string | null {
   const cookieHeader = req.headers.cookie;
 
   if (!cookieHeader) {
@@ -136,9 +121,7 @@ function readCookie(
   }
 
   for (const part of cookieHeader.split(";")) {
-    const [key, ...valueParts] = part
-      .trim()
-      .split("=");
+    const [key, ...valueParts] = part.trim().split("=");
 
     if (key === name) {
       return valueParts.join("=") || null;
@@ -148,12 +131,11 @@ function readCookie(
   return null;
 }
 
-export interface AuthenticatedZafRequest
-  extends Request {
+export interface AuthenticatedZafRequest extends Request {
   zafSession: ZafSession;
 }
 
-export function requireZafSession(
+function requireZafCookieSession(
   req: Request,
   res: Response,
   next: NextFunction,
@@ -161,9 +143,7 @@ export function requireZafSession(
   try {
     const token = readCookie(req, COOKIE_NAME);
 
-    const session = token
-      ? verifyZafSessionToken(token)
-      : null;
+    const session = token ? verifyZafSessionToken(token) : null;
 
     if (!session) {
       res.status(401).json({
@@ -172,19 +152,72 @@ export function requireZafSession(
       return;
     }
 
-    (
-      req as AuthenticatedZafRequest
-    ).zafSession = session;
+    (req as AuthenticatedZafRequest).zafSession = session;
 
     next();
   } catch (error) {
-    console.error(
-      "[zaf-session] Failed to verify session:",
-      error,
-    );
+    console.error("[zaf-session] Failed to verify session:", error);
 
     res.status(401).json({
       error: "Invalid ZAF session",
     });
+  }
+}
+
+/**
+ * Production path: Bearer ZAF JWT from the packaged Zendesk app.
+ * The cookie path above is kept only as a local-dev / test fallback.
+ */
+export async function requireZafSession(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const authHeader = req.get("Authorization") ?? "";
+
+  if (!authHeader.startsWith("Bearer ")) {
+    requireZafCookieSession(req, res, next);
+    return;
+  }
+
+  let result;
+  try {
+    result = await verifyZafBearer(req);
+  } catch (error) {
+    console.error("[zaf-session] secret lookup failed:", error);
+    res.status(503).json({ error: "database_unavailable" });
+    return;
+  }
+
+  if (!result.ok) {
+    if (result.reason === "not_installed") {
+      res.status(404).json({ error: "not_installed" });
+      return;
+    }
+    res.status(401).json({ error: "Invalid ZAF JWT" });
+    return;
+  }
+
+  const claims = result.claims;
+
+  try {
+    const account = await findZendeskAccountBySubdomain(claims.subdomain);
+    if (!account) {
+      res
+        .status(404)
+        .json({ error: "not_installed", subdomain: claims.subdomain });
+      return;
+    }
+
+    (req as AuthenticatedZafRequest).zafSession = {
+      zendeskAccountId: account.id,
+      subdomain: account.subdomain,
+      exp: claims.exp,
+    };
+
+    next();
+  } catch (error) {
+    console.error("[zaf-session] account lookup failed:", error);
+    res.status(503).json({ error: "database_unavailable" });
   }
 }

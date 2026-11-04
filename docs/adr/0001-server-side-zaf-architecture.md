@@ -1,6 +1,6 @@
 # ADR-0001: Server-side ZAF architecture
 
-- Status: Accepted
+- Status: Accepted (auth + dashboard delivery amended by ADR-0007)
 - Date: 2026-06-29
 - Jira: HCIQ-1
 

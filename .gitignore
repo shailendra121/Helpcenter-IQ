@@ -42,3 +42,9 @@ Thumbs.db
 
 # Local db data (docker volumes, if mounted into repo dir during dev)
 infra/docker/pgdata/
+
+# Dashboard build output (generated into the ZAF app by `npm run build`)
+zendesk-app/assets/dashboard/
+
+# zcli local config
+zendesk-app/zcli.apps.config.json

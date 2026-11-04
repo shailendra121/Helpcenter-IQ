@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { AuthenticatedZafRequest } from "../auth/zafSession.js";
 import { requireZafSession } from "../auth/zafSession.js";
 import { requireTrustedOrigin } from "../auth/requireTrustedOrigin.js";
+import { triggerWorkerJob } from "../jobs/triggerWorkerJob.js";
 import {
   ActiveRunExistsError,
   createQueuedRun,
@@ -45,6 +46,9 @@ router.post("/",requireTrustedOrigin, async (rawReq, res) => {
       req.zafSession.zendeskAccountId,
       windowDays,
     );
+    // Kick the worker now so the user doesn't wait for the next schedule.
+    // Fire-and-forget: don't block the response; scheduler is the backstop.
+    void triggerWorkerJob();
 
     return res.status(202).json({
       id: run.id,

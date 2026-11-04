@@ -20,6 +20,14 @@ export function requireTrustedOrigin(
   res: Response,
   next: NextFunction,
 ): void {
+  // Bearer ZAF JWT requests carry no ambient credentials (no cookie), so
+  // there is nothing for CSRF to abuse. Zendesk's request proxy also does
+  // not send a browser Origin header.
+  if ((req.get("Authorization") ?? "").startsWith("Bearer ")) {
+    next();
+    return;
+  }
+
   if (
     req.method === "GET" ||
     req.method === "HEAD" ||

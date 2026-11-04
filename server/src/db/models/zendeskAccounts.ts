@@ -7,6 +7,7 @@ export interface ZendeskAccountRow {
   oauth_refresh_token_encrypted: string | null;
   oauth_scope: string | null;
   oauth_expires_at: Date | null;
+  zaf_secret_encrypted: string | null;
   installed_at: Date;
 }
 
@@ -82,4 +83,30 @@ export async function updateZendeskAccountTokens(
      WHERE subdomain = $4`,
     [input.accessTokenEncrypted, input.refreshTokenEncrypted, input.expiresAt, subdomain]
   );
+}
+/**
+ * Store (or replace) the per-account ZAF signing secret, already
+ * encrypted by the caller (see tokenEncryption.ts).
+ */
+export async function setAccountZafSecret(
+  subdomain: string,
+  zafSecretEncrypted: string,
+): Promise<void> {
+  await pool.query(
+    `UPDATE zendesk_accounts SET zaf_secret_encrypted = $1 WHERE subdomain = $2`,
+    [zafSecretEncrypted, subdomain],
+  );
+}
+
+/**
+ * Returns this account's encrypted ZAF secret, or null if none stored.
+ */
+export async function getAccountZafSecret(
+  subdomain: string,
+): Promise<string | null> {
+  const result = await pool.query<{ zaf_secret_encrypted: string | null }>(
+    `SELECT zaf_secret_encrypted FROM zendesk_accounts WHERE subdomain = $1`,
+    [subdomain],
+  );
+  return result.rows[0]?.zaf_secret_encrypted ?? null;
 }
