@@ -195,6 +195,7 @@ describe("ticket idempotency (real database)", () => {
 
     await updateTicketEmbedding(
       ticketId,
+      accountId, 
       Array.from({ length: 1536 }, () => 0.1)
     );
 
@@ -256,6 +257,7 @@ describe("ticket idempotency (real database)", () => {
 
     await updateTicketEmbedding(
       ticketId,
+      accountId, 
       Array.from({ length: 1536 }, () => 0.4)
     );
 

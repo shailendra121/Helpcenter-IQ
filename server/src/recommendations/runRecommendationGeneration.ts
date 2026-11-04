@@ -154,7 +154,7 @@ async function processGap(
   try {
     await client.query("BEGIN");
 
-    await deleteRecommendationsForGap(gap.id, client);
+    await deleteRecommendationsForGap(gap.id, zendeskAccountId, client);
 
     await createRecommendation(
       {

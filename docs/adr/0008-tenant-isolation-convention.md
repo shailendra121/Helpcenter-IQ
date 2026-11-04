@@ -41,3 +41,21 @@ RLS can be revisited before scale.
   are no-ops.
 - New model queries must follow the convention; the two-account test is the
   guardrail that catches violations.
+
+## Enforcement
+
+The two-account isolation tests are the guardrail:
+
+- `tenantDataIsolation.test.ts` — model-level (`analysis_runs`): a run id from
+  another account returns nothing on read and is a no-op on mutation.
+- `apiTenantIsolation.test.ts` — API-level: account A's token against account
+  B's ids (session, gaps, gap detail, drafts, draft edit/status/regenerate,
+  create-draft-from-gap, `analysis-runs/:id`) returns 404 / nothing and changes
+  nothing of B's.
+
+Any new tenant-scoped query that omits `zendesk_account_id` will surface as a
+cross-account leak in these tests when its endpoint is exercised. New
+data-serving endpoints MUST be added to `apiTenantIsolation.test.ts` as part of
+the change, so the guardrail keeps pace. A lightweight static check (grep
+`db/models` for a tenant-table query without `zendesk_account_id`) is a
+tracked follow-up.

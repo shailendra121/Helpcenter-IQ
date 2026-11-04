@@ -68,9 +68,9 @@ describe("clusterTicketsForRunSQL (real database)", () => {
     const different = Array(1536).fill(0);
     different[0] = 1; // orthogonal direction
 
-    await updateTicketEmbedding(ticketIds[0], similarA);
-    await updateTicketEmbedding(ticketIds[1], similarB);
-    await updateTicketEmbedding(ticketIds[2], different);
+    await updateTicketEmbedding(ticketIds[0], accountId, similarA);
+    await updateTicketEmbedding(ticketIds[1], accountId, similarB);
+    await updateTicketEmbedding(ticketIds[2], accountId, different);
   });
 
   afterAll(async () => {
