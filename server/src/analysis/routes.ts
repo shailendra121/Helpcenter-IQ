@@ -142,7 +142,7 @@ router.get("/:id", async (rawReq, res) => {
       });
     }
 
-    const run = await getAnalysisRun(runId);
+    const run = await getAnalysisRun(runId, req.zafSession.zendeskAccountId);
 
     if (
       !run ||
