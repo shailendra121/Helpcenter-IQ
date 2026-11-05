@@ -56,6 +56,6 @@ The two-account isolation tests are the guardrail:
 Any new tenant-scoped query that omits `zendesk_account_id` will surface as a
 cross-account leak in these tests when its endpoint is exercised. New
 data-serving endpoints MUST be added to `apiTenantIsolation.test.ts` as part of
-the change, so the guardrail keeps pace. A lightweight static check (grep
-`db/models` for a tenant-table query without `zendesk_account_id`) is a
-tracked follow-up.
+the change, so the guardrail keeps pace. A lightweight static check 
+(grep `db/models` for a tenant-table query without
+`zendesk_account_id`) is tracked as a follow-up in HCIQ-26.

@@ -18,15 +18,31 @@ vi.mock("../../src/auth/tokenEncryption.js", async () => {
   >("../../src/auth/tokenEncryption.js");
   return { ...actual, decryptToken: (s: string) => s };
 });
+vi.mock("../../src/db/models/analysisRuns.js", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../src/db/models/analysisRuns.js")
+  >("../../src/db/models/analysisRuns.js");
+  return {
+    ...actual,
+    createQueuedRun: vi.fn().mockResolvedValue({
+      id: 1,
+      window_days: 30,
+      status: "queued",
+      current_stage: null,
+    }),
+  };
+});
 
 import app from "../../src/app.js";
 import {
   findZendeskAccountBySubdomain,
   getAccountZafSecret,
 } from "../../src/db/models/zendeskAccounts.js";
+import { createQueuedRun } from "../../src/db/models/analysisRuns.js";
 
 const mockFindAccount = vi.mocked(findZendeskAccountBySubdomain);
 const mockGetSecret = vi.mocked(getAccountZafSecret);
+const mockCreateRun = vi.mocked(createQueuedRun);
 const SECRET = "test-zaf-jwt-secret-test-zaf-jwt-secret";
 
 function bearer(subdomain: string): string {
@@ -50,17 +66,17 @@ describe("tenant comes only from the verified JWT (AC#2)", () => {
     expect(mockFindAccount).toHaveBeenCalledWith("acme");
     expect(mockFindAccount).not.toHaveBeenCalledWith("victim");
   });
-    it("ignores a spoofed zendeskAccountId in the request body", async () => {
+
+  it("ignores a spoofed zendeskAccountId in the request body", async () => {
     const res = await request(app)
       .post("/api/analysis-runs")
-      .set("Authorization", bearer("acme")) // JWT says acme (account 7)
-      .send({ windowDays: 30, zendeskAccountId: 99999 }); // spoofed id in body
+      .set("Authorization", bearer("acme")) // JWT → account id 7
+      .send({ windowDays: 30, zendeskAccountId: 99999 }); // spoofed in body
 
-    // The route must use the account from the JWT session, never the body.
-    // It may 202 (created) or fail validation later, but never acts on 99999.
-    expect(res.status).not.toBe(403);
     expect(res.status).not.toBe(401);
-    // createQueuedRun is called with the session account (7), not the body's 99999.
-    // (The account is attached by requireZafSession from the verified JWT.)
+    expect(res.status).not.toBe(403);
+    // The run is created for the session account (7 from the JWT), NEVER 99999.
+    expect(mockCreateRun).toHaveBeenCalledWith(7, 30);
+    expect(mockCreateRun).not.toHaveBeenCalledWith(99999, expect.anything());
   });
 });

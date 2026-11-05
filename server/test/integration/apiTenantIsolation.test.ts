@@ -23,7 +23,12 @@ import { upsertZendeskAccount } from "../../src/db/models/zendeskAccounts.js";
 import { createAnalysisRun } from "../../src/db/models/analysisRuns.js";
 import { createTicketCluster } from "../../src/db/models/ticketClusters.js";
 import { createKnowledgeGap } from "../../src/db/models/knowledgeGaps.js";
-import { createDraftArticle } from "../../src/db/models/draftArticles.js";
+import {
+  createDraftArticle,
+  getDraftArticleById,
+} from "../../src/db/models/draftArticles.js";
+import { upsertTicket } from "../../src/db/models/tickets.js";
+import { upsertArticleMetadata } from "../../src/db/models/guideArticles.js";
 
 function bearer(subdomain: string): string {
   return `Bearer ${jwt.sign({ subdomain }, SECRET, { expiresIn: 300 })}`;
@@ -31,22 +36,53 @@ function bearer(subdomain: string): string {
 
 /**
  * HCIQ-20 AC#1 — API-level two-account isolation.
- * Each account has its own run, gap and draft. Every data-serving endpoint is
- * called with account A's token but account B's ids, and must return nothing /
- * 404 and change nothing of B's. Mutation endpoints may also reject with 400
- * (validation) — the point is that B's data is never read or changed.
+ * Each account gets tickets, a Guide article, a run, cluster, gap and draft.
+ * Every data-serving endpoint is called with account A's token but account B's
+ * ids; A must get 404 / nothing, and B's draft + gap must be unchanged in the DB.
  */
 describe("API tenant isolation — two accounts (real database)", () => {
   const subA = `api-a-${Date.now()}`;
   const subB = `api-b-${Date.now()}`;
   let accA: number;
   let accB: number;
-  let runB: number;
   let gapB: number;
   let draftB: number;
+  let runB: number;
 
-  async function seed(accountId: number) {
+  async function seed(accountId: number, ticketBase: number, articleId: number) {
     const run = await createAnalysisRun(accountId, 30);
+
+    // A couple of tickets for this account.
+    for (let n = 0; n < 2; n++) {
+      await upsertTicket({
+        zendeskAccountId: accountId,
+        analysisRunId: run.id,
+        zendeskTicketId: ticketBase + n,
+        subject: `t${ticketBase + n}`,
+        description: "d",
+        firstComment: "c",
+        status: "open",
+        tags: [],
+        zendeskCreatedAt: new Date(),
+        copilotTopic: null,
+        copilotSentiment: null,
+        copilotIntent: null,
+      });
+    }
+
+    // One Guide article for this account.
+    await upsertArticleMetadata({
+      zendeskAccountId: accountId,
+      zendeskArticleId: articleId,
+      title: `a${articleId}`,
+      cleanText: "text",
+      sectionId: null,
+      locale: "en-us",
+      draft: false,
+      zendeskCreatedAt: new Date(),
+      zendeskUpdatedAt: new Date(),
+    });
+
     const clusterId = await createTicketCluster({
       zendeskAccountId: accountId,
       analysisRunId: run.id,
@@ -57,6 +93,7 @@ describe("API tenant isolation — two accounts (real database)", () => {
       memberVectors: [],
       representativeTicketIds: [],
     });
+
     const gapId = await createKnowledgeGap({
       analysisRunId: run.id,
       zendeskAccountId: accountId,
@@ -70,6 +107,7 @@ describe("API tenant isolation — two accounts (real database)", () => {
       justification: "seed",
       topicEmbedding: Array(1536).fill(0.01),
     });
+
     const draftId = await createDraftArticle({
       knowledgeGapId: gapId,
       zendeskAccountId: accountId,
@@ -81,6 +119,7 @@ describe("API tenant isolation — two accounts (real database)", () => {
       internalReviewerNotes: "",
       aiModelUsed: "test",
     });
+
     return { runId: run.id, gapId, draftId };
   }
 
@@ -102,8 +141,8 @@ describe("API tenant isolation — two accounts (real database)", () => {
     accA = a.id;
     accB = b.id;
 
-    await seed(accA);
-    const bData = await seed(accB);
+    await seed(accA, 1000, 5000);
+    const bData = await seed(accB, 2000, 6000);
     runB = bData.runId;
     gapB = bData.gapId;
     draftB = bData.draftId;
@@ -117,6 +156,16 @@ describe("API tenant isolation — two accounts (real database)", () => {
 
   const A = () => ({ Authorization: bearer(subA) });
 
+  // Valid bodies so mutation tests reach the ownership check (not a 400).
+  const validEdit = {
+    suggested_title: "edited by A",
+    problem_summary: "p",
+    step_by_step_resolution: "s",
+    faq: [],
+    related_keywords: [],
+    internal_reviewer_notes: "",
+  };
+
   it("A's session is A, not B", async () => {
     const res = await request(app).get("/api/dashboard/session").set(A());
     expect(res.status).toBe(200);
@@ -124,7 +173,14 @@ describe("API tenant isolation — two accounts (real database)", () => {
     expect(JSON.stringify(res.body)).not.toContain(subB);
   });
 
-  it("A's gaps/drafts never include B's data", async () => {
+  it("A's summary counts only A's data", async () => {
+    const res = await request(app).get("/api/dashboard/summary").set(A());
+    expect(res.status).toBe(200);
+    // A has exactly one gap; B's gap id must not leak.
+    expect(JSON.stringify(res.body)).not.toContain(String(gapB));
+  });
+
+  it("A's gaps/drafts never include B's", async () => {
     const gaps = await request(app).get("/api/dashboard/gaps").set(A());
     expect(gaps.status).toBe(200);
     expect(JSON.stringify(gaps.body)).not.toContain(`"id":${gapB}`);
@@ -134,51 +190,59 @@ describe("API tenant isolation — two accounts (real database)", () => {
     expect(JSON.stringify(drafts.body)).not.toContain(`"id":${draftB}`);
   });
 
-  it("A cannot read B's gap detail", async () => {
+  it("A cannot read B's gap detail (404)", async () => {
     const res = await request(app).get(`/api/dashboard/gaps/${gapB}`).set(A());
     expect(res.status).toBe(404);
   });
 
-  it("A cannot read B's draft", async () => {
+  it("A cannot read B's draft (404)", async () => {
     const res = await request(app)
       .get(`/api/dashboard/drafts/${draftB}`)
       .set(A());
     expect(res.status).toBe(404);
   });
 
-  it("A cannot edit B's draft", async () => {
+  it("A cannot edit B's draft — valid body, 404, B unchanged", async () => {
     const res = await request(app)
       .put(`/api/dashboard/drafts/${draftB}`)
       .set(A())
-      .send({ suggested_title: "hacked" });
-    expect([400, 403, 404]).toContain(res.status);
+      .send(validEdit);
+    expect(res.status).toBe(404);
+
+    // B's draft must be untouched.
+    const row = await getDraftArticleById(draftB, accB);
+    expect(row?.suggested_title).toBe("seed draft");
+    expect(row?.reviewer_suggested_title ?? null).toBeNull();
   });
 
-  it("A cannot change B's draft status", async () => {
+  it("A cannot change B's draft status — valid body, 404, status unchanged", async () => {
     const res = await request(app)
       .post(`/api/dashboard/drafts/${draftB}/status`)
       .set(A())
       .send({ status: "approved" });
-    expect([400, 403, 404]).toContain(res.status);
+    expect(res.status).toBe(404);
+
+    const row = await getDraftArticleById(draftB, accB);
+    expect(row?.review_status).toBe("draft");
   });
 
-  it("A cannot regenerate B's draft", async () => {
+  it("A cannot regenerate B's draft (404)", async () => {
     const res = await request(app)
       .post(`/api/dashboard/drafts/${draftB}/regenerate`)
       .set(A())
       .send({});
-    expect([400, 403, 404]).toContain(res.status);
+    expect(res.status).toBe(404);
   });
 
-  it("A cannot create a draft from B's gap", async () => {
+  it("A cannot create a draft from B's gap (404)", async () => {
     const res = await request(app)
       .post(`/api/dashboard/gaps/${gapB}/drafts`)
       .set(A())
       .send({});
-    expect([400, 403, 404]).toContain(res.status);
+    expect(res.status).toBe(404);
   });
 
-  it("A cannot read B's analysis run", async () => {
+  it("A cannot read B's analysis run (404)", async () => {
     const res = await request(app).get(`/api/analysis-runs/${runB}`).set(A());
     expect(res.status).toBe(404);
   });
