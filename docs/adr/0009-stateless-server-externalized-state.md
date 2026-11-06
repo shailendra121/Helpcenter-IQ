@@ -33,15 +33,14 @@ re-derivable). Specifically:
 
 ## Audited module-level state and disposition
 
-- `zendesk/ticketFieldsLookup.ts` → bounded cache (above). ✅
+- `zendesk/ticketFieldsLookup.ts` → bounded cache (above). 
 - `ai/withRetry.ts` (`lastCallStartedAt`, `throttleQueue`) → a **best-effort
   per-instance** AI throttle. Not correctness-critical; each instance paces its
   own calls. Global, fair, per-tenant rate limiting is owned by **HCIQ-22**,
   not this story.
-- `jobs/analysisRunWorker.ts` (`workerRunning`) → lives in the analysis
-  **worker Cloud Run Job**, which runs as a single execution (`runWorkerOnce`)
-  and exits. It is not shared server state and does not affect multi-instance
-  web serving.
+- The old in-process worker loop (`startAnalysisRunWorker` / `workerRunning`)
+  has been removed; the worker now runs as a single-shot Cloud Run Job
+  (`runWorkerOnce`) with stale-run recovery, so no long-lived worker state remains.
 
 ## Consequences
 

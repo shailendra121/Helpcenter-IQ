@@ -5,14 +5,6 @@ import {
 } from "../db/models/analysisRuns.js";
 import { runAnalysisPipeline } from "./runAnalysisPipeline.js";
 
-const POLL_INTERVAL_MS = 2000;
-
-let workerRunning = false;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export async function processNextAnalysisRun(): Promise<boolean> {
   const run = await claimNextQueuedRun();
 
@@ -26,30 +18,17 @@ export async function processNextAnalysisRun(): Promise<boolean> {
 
   try {
     await runAnalysisPipeline(run.id, run.zendesk_account_id);
-
-    console.log(
-      `[analysis-worker] Run ${run.id} completed successfully`,
-    );
+    console.log(`[analysis-worker] Run ${run.id} completed successfully`);
   } catch (error) {
-    console.error(
-      `[analysis-worker] Run ${run.id} failed:`,
-      error,
-    );
+    console.error(`[analysis-worker] Run ${run.id} failed:`, error);
 
-    // The pipeline records stage-level failures.
-    // This is a safety net for failures that happen outside a stage.
+    // The pipeline records stage-level failures; this is a safety net for
+    // failures that happen outside a stage.
     const currentRun = await getAnalysisRun(run.id, run.zendesk_account_id);
-
     if (currentRun?.status !== "failed") {
       await failAnalysisRun(run.id, run.zendesk_account_id);
     }
   }
 
   return true;
-}
-
-export function stopAnalysisRunWorker(): void {
-  workerRunning = false;
-
-  console.log("[analysis-worker] Stopped");
 }
