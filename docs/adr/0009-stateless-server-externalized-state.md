@@ -23,7 +23,7 @@ re-derivable). Specifically:
   it with the shared `ZAF_SESSION_SECRET`), and one-time use is enforced in a
   shared DB table (`oauth_state_used`), with a 10-minute TTL via the JWT's
   expiry. No per-instance memory is involved, so start and callback can be
-  served by different instances (see HCIQ-20). Covered by
+  served by different instances (see HCIQ-25, PR #23). Covered by
   `oauthStateCrossInstance.test.ts`.
 - **Ticket-field id cache** (`ticketFieldsLookup.ts`) — kept per-instance in
   memory but **bounded**: 10-minute TTL and a 500-entry cap with oldest-first

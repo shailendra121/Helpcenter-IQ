@@ -2,7 +2,6 @@ import {
   claimNextQueuedRun,
   failAnalysisRun,
   getAnalysisRun,
-  recoverInterruptedRuns,
 } from "../db/models/analysisRuns.js";
 import { runAnalysisPipeline } from "./runAnalysisPipeline.js";
 
@@ -47,40 +46,6 @@ export async function processNextAnalysisRun(): Promise<boolean> {
   }
 
   return true;
-}
-
-export async function startAnalysisRunWorker(): Promise<void> {
-  if (workerRunning) {
-    return;
-  }
-
-  workerRunning = true;
-  const recoveredRuns = await recoverInterruptedRuns();
-
-  if (recoveredRuns > 0) {
-    console.log(
-      `[analysis-worker] Recovered ${recoveredRuns} interrupted run(s)`,
-    );
-  }
-
-  console.log("[analysis-worker] Started");
-
-  while (workerRunning) {
-    try {
-      const processed = await processNextAnalysisRun();
-
-      if (!processed) {
-        await sleep(POLL_INTERVAL_MS);
-      }
-    } catch (error) {
-      console.error(
-        "[analysis-worker] Unexpected worker error:",
-        error,
-      );
-
-      await sleep(POLL_INTERVAL_MS);
-    }
-  }
 }
 
 export function stopAnalysisRunWorker(): void {

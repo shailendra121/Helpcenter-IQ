@@ -1,52 +1,81 @@
 import "dotenv/config";
-import { describe, it, expect, afterAll } from "vitest";
-import jwt from "jsonwebtoken";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import request from "supertest";
 import { pool } from "../../src/db/pool.js";
-import { consumeOAuthState } from "../../src/db/models/oauthState.js";
 
-/**
- * HCIQ-21 / AC-1: OAuth CSRF state must work when the authorize-start and the
- * callback are served by different server instances. The state is a signed JWT
- * (any instance can verify with the shared secret) and one-time use is enforced
- * in a shared DB table — so there is no per-instance memory to lose. This test
- * simulates "signed on instance A, verified + consumed on instance B".
- */
-describe("OAuth state works across instances (real database)", () => {
-  const secret = process.env.ZAF_SESSION_SECRET ?? "x".repeat(32);
-  const jtis: string[] = [];
+const OAUTH_MOCK = () => ({
+  getOAuthClient: () => ({
+    buildAuthorizeUrl: (_sub: string, _redirect: string, state: string) =>
+      `https://zendesk.example/oauth?state=${encodeURIComponent(state)}`,
+    exchangeCodeForToken: vi.fn().mockResolvedValue({
+      accessToken: "a",
+      refreshToken: "r",
+      scope: "read write",
+      expiresAt: new Date(Date.now() + 3600_000),
+    }),
+  }),
+});
+
+const ACCOUNT_MOCK = async () => {
+  const actual = await vi.importActual<
+    typeof import("../../src/db/models/zendeskAccounts.js")
+  >("../../src/db/models/zendeskAccounts.js");
+  return {
+    ...actual,
+    upsertZendeskAccount: vi.fn().mockResolvedValue({ id: 1 }),
+    setAccountZafSecret: vi.fn().mockResolvedValue(undefined),
+  };
+};
+
+const SETSECRET_MOCK = () => ({
+  setAppJwtSecret: vi.fn().mockResolvedValue(undefined),
+});
+
+async function loadApp() {
+  vi.resetModules();
+  vi.doMock("../../src/auth/getOAuthClient.js", OAUTH_MOCK);
+  vi.doMock("../../src/db/models/zendeskAccounts.js", ACCOUNT_MOCK);
+  vi.doMock("../../src/zendesk/setAppJwtSecret.js", SETSECRET_MOCK);
+  const mod = await import("../../src/app.js");
+  return mod.default;
+}
+
+describe("OAuth install works across instances (real database)", () => {
+  let capturedJti: string | null = null;
 
   afterAll(async () => {
-    if (jtis.length) {
-      await pool.query("DELETE FROM oauth_state_used WHERE jti = ANY($1)", [
-        jtis,
+    if (capturedJti) {
+      await pool.query("DELETE FROM oauth_state_used WHERE jti = $1", [
+        capturedJti,
       ]);
     }
   });
 
-  it("a state signed on one instance is accepted and consumed on another", async () => {
-    // Instance A signs the state.
-    const jti = `cross-${Date.now()}`;
-    jtis.push(jti);
-    const state = jwt.sign({ subdomain: "acme", jti }, secret, {
-      expiresIn: "10m",
-    });
+  it("start on instance A, callback on instance B completes; replay is rejected", async () => {
+    const appA = await loadApp();
+    const start = await request(appA).get(
+      "/zendesk/oauth/start?subdomain=acme",
+    );
+    expect(start.status).toBe(302);
 
-    // Instance B (no shared memory) verifies the signature...
-    const payload = jwt.verify(state, secret) as { subdomain: string; jti: string };
-    expect(payload.subdomain).toBe("acme");
+    const location = start.headers.location as string;
+    const state = new URL(location).searchParams.get("state");
+    expect(state).toBeTruthy();
+    const payload = JSON.parse(
+      Buffer.from((state as string).split(".")[1], "base64url").toString(),
+    );
+    capturedJti = payload.jti;
 
-    // ...and consumes the one-time state from the shared DB table.
-    const firstUse = await consumeOAuthState(payload.jti);
-    expect(firstUse).toBe(true);
-  });
+    const appB = await loadApp();
+    const first = await request(appB).get(
+      `/zendesk/oauth/callback?code=abc&state=${encodeURIComponent(state as string)}`,
+    );
+    expect(first.status).toBe(200);
+    expect(first.text).toContain("connected");
 
-  it("the same state cannot be replayed on any instance (one-time use is shared)", async () => {
-    const jti = `cross-replay-${Date.now()}`;
-    jtis.push(jti);
-
-    // First consume (instance A) succeeds.
-    expect(await consumeOAuthState(jti)).toBe(true);
-    // Replay on a different instance hits the same shared table → rejected.
-    expect(await consumeOAuthState(jti)).toBe(false);
+    const replay = await request(appB).get(
+      `/zendesk/oauth/callback?code=abc&state=${encodeURIComponent(state as string)}`,
+    );
+    expect(replay.status).toBe(400);
   });
 });
