@@ -41,3 +41,4 @@ What this makes easier, harder, or constrains going forward.
 | [0006](./0006-google-gemini-default-ai-provider.md) | Google Gemini as the default AI provider (free tier for dev, paid tier for production) | Accepted |
 | [0007](./0007-packaged-dashboard-per-account-hs256-auth.md) | Packaged dashboard with per-account HS256 bearer auth | Accepted |
 | [0008](./0008-tenant-isolation-convention.md) | Tenant isolation as a model-layer convention (account_id in every tenant-scoped query) | Accepted |
+| [0009](./0009-stateless-server-externalized-state.md) | Stateless server, externalized state (multi-instance readiness) | Accepted |
