@@ -208,7 +208,8 @@ export async function claimNextQueuedRun(): Promise<AnalysisRunRow | null> {
  */
 export async function startAnalysisStage(
   runId: number,
-  stage: AnalysisStage
+  zendeskAccountId: number,
+  stage: AnalysisStage,
 ): Promise<void> {
   await pool.query(
     `UPDATE analysis_runs
@@ -223,8 +224,9 @@ export async function startAnalysisStage(
            || jsonb_build_object('started_at', now()),
          true
        )
-     WHERE id = $1`,
-    [runId, stage]
+     WHERE id = $1
+       AND zendesk_account_id = $3`,
+    [runId, stage, zendeskAccountId],
   );
 }
 
@@ -233,7 +235,8 @@ export async function startAnalysisStage(
  */
 export async function completeAnalysisStage(
   runId: number,
-  stage: AnalysisStage
+  zendeskAccountId: number,
+  stage: AnalysisStage,
 ): Promise<void> {
   await pool.query(
     `UPDATE analysis_runs
@@ -245,8 +248,9 @@ export async function completeAnalysisStage(
            || jsonb_build_object('completed_at', now()),
          true
        )
-     WHERE id = $1`,
-    [runId, stage]
+     WHERE id = $1
+       AND zendesk_account_id = $3`,
+    [runId, stage, zendeskAccountId],
   );
 }
 /**
@@ -257,8 +261,9 @@ export async function completeAnalysisStage(
  */
 export async function failRunAtStage(
   runId: number,
+  zendeskAccountId: number,
   stage: AnalysisStage,
-  error: unknown
+  error: unknown,
 ): Promise<void> {
   const errorMessage =
     error instanceof Error ? error.message : String(error);
@@ -270,8 +275,9 @@ export async function failRunAtStage(
        current_stage = $2,
        error_stage = $2,
        error_message = $3
-     WHERE id = $1`,
-    [runId, stage, errorMessage]
+     WHERE id = $1
+       AND zendesk_account_id = $4`,
+    [runId, stage, errorMessage, zendeskAccountId],
   );
 }
 
@@ -282,7 +288,8 @@ export async function failRunAtStage(
  * can determine where to resume.
  */
 export async function retryAnalysisRun(
-  runId: number
+  runId: number,
+  zendeskAccountId: number,
 ): Promise<AnalysisRunRow | null> {
   const result = await pool.query<AnalysisRunRow>(
     `UPDATE analysis_runs
@@ -294,8 +301,9 @@ export async function retryAnalysisRun(
        completed_at = NULL
      WHERE id = $1
        AND status = 'failed'
+       AND zendesk_account_id = $2
      RETURNING *`,
-    [runId]
+    [runId, zendeskAccountId],
   );
 
   return result.rows[0] ?? null;
@@ -305,7 +313,8 @@ export async function retryAnalysisRun(
  * Completes the entire analysis run.
  */
 export async function completeAnalysisRun(
-  runId: number
+  runId: number,
+  zendeskAccountId: number,
 ): Promise<void> {
   await pool.query(
     `UPDATE analysis_runs
@@ -313,8 +322,9 @@ export async function completeAnalysisRun(
        status = 'completed',
        current_stage = NULL,
        completed_at = now()
-     WHERE id = $1`,
-    [runId]
+     WHERE id = $1
+       AND zendesk_account_id = $2`,
+    [runId, zendeskAccountId],
   );
 }
 
@@ -325,13 +335,15 @@ export async function completeAnalysisRun(
  * HCIQ-14 stage orchestration should use failRunAtStage().
  */
 export async function failAnalysisRun(
-  runId: number
+  runId: number,
+  zendeskAccountId: number,
 ): Promise<void> {
   await pool.query(
     `UPDATE analysis_runs
      SET status = 'failed'
-     WHERE id = $1`,
-    [runId]
+     WHERE id = $1
+       AND zendesk_account_id = $2`,
+    [runId, zendeskAccountId],
   );
 }
 
@@ -342,13 +354,15 @@ export async function failAnalysisRun(
  */
 export async function updateAnalysisRunCursor(
   runId: number,
-  cursor: string
+  zendeskAccountId: number,
+  cursor: string,
 ): Promise<void> {
   await pool.query(
     `UPDATE analysis_runs
      SET ingestion_cursor = $1
-     WHERE id = $2`,
-    [cursor, runId]
+     WHERE id = $2
+       AND zendesk_account_id = $3`,
+    [cursor, runId, zendeskAccountId],
   );
 }
 
@@ -356,13 +370,15 @@ export async function updateAnalysisRunCursor(
  * Gets a complete analysis run record.
  */
 export async function getAnalysisRun(
-  runId: number
+  runId: number,
+  zendeskAccountId: number,
 ): Promise<AnalysisRunRow | null> {
   const result = await pool.query<AnalysisRunRow>(
     `SELECT *
      FROM analysis_runs
-     WHERE id = $1`,
-    [runId]
+     WHERE id = $1
+       AND zendesk_account_id = $2`,
+    [runId, zendeskAccountId],
   );
 
   return result.rows[0] ?? null;

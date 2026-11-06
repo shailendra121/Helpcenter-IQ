@@ -185,6 +185,7 @@ describe("runRecommendationGeneration — recommendation replacement", () => {
 
     expect(mockDeleteRecommendationsForGap).toHaveBeenCalledWith(
       1,
+      1,
       mockClient
     );
 
@@ -226,6 +227,7 @@ describe("runRecommendationGeneration — recommendation replacement", () => {
     );
 
     expect(mockDeleteRecommendationsForGap).toHaveBeenCalledWith(
+      1,
       1,
       mockClient
     );

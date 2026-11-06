@@ -105,6 +105,7 @@ describe("runAnalysisPipeline", () => {
       oauth_refresh_token_encrypted: null,
       oauth_scope: null,
       oauth_expires_at: null,
+      zaf_secret_encrypted: null,
       installed_at: new Date(),
     });
 
@@ -144,11 +145,11 @@ describe("runAnalysisPipeline", () => {
 
     const calls: string[] = [];
 
-    mockedStartAnalysisStage.mockImplementation(async (_runId, stage) => {
+    mockedStartAnalysisStage.mockImplementation(async (_runId, _accountId, stage) => {
       calls.push(`start:${stage}`);
     });
 
-    mockedCompleteAnalysisStage.mockImplementation(async (_runId, stage) => {
+    mockedCompleteAnalysisStage.mockImplementation(async (_runId, _accountId, stage) => {
       calls.push(`complete:${stage}`);
     });
 
@@ -197,7 +198,7 @@ describe("runAnalysisPipeline", () => {
       };
     });
 
-    await runAnalysisPipeline(42);
+    await runAnalysisPipeline(42, 1);
 
     expect(calls).toEqual([
       "start:ticket_ingestion",
@@ -221,13 +222,13 @@ describe("runAnalysisPipeline", () => {
       "complete:recommendation",
     ]);
 
-    expect(mockedCompleteAnalysisRun).toHaveBeenCalledWith(42);
+    expect(mockedCompleteAnalysisRun).toHaveBeenCalledWith(42, 1);
   });
 
   it("throws when the analysis run does not exist", async () => {
     mockedGetAnalysisRun.mockResolvedValue(null);
 
-    await expect(runAnalysisPipeline(42)).rejects.toThrow(
+    await expect(runAnalysisPipeline(42, 1)).rejects.toThrow(
       "Analysis run 42 not found",
     );
 
@@ -239,7 +240,7 @@ describe("runAnalysisPipeline", () => {
     mockedGetAnalysisRun.mockResolvedValue(makeRun());
     mockedFindZendeskAccountById.mockResolvedValue(null);
 
-    await expect(runAnalysisPipeline(42)).rejects.toThrow(
+    await expect(runAnalysisPipeline(42, 1)).rejects.toThrow(
       "Zendesk account 1 not found",
     );
 
@@ -266,7 +267,7 @@ describe("runAnalysisPipeline", () => {
       }),
     );
 
-    await runAnalysisPipeline(42);
+    await runAnalysisPipeline(42, 1);
 
     expect(mockedIngestTickets).not.toHaveBeenCalled();
     expect(mockedIngestGuideArticles).not.toHaveBeenCalled();
@@ -278,7 +279,7 @@ describe("runAnalysisPipeline", () => {
     expect(mockedStartAnalysisStage).toHaveBeenCalledTimes(2);
     expect(mockedCompleteAnalysisStage).toHaveBeenCalledTimes(2);
 
-    expect(mockedCompleteAnalysisRun).toHaveBeenCalledWith(42);
+    expect(mockedCompleteAnalysisRun).toHaveBeenCalledWith(42, 1);
   });
 
   it("records a stage failure and does not continue to later stages", async () => {
@@ -288,7 +289,7 @@ describe("runAnalysisPipeline", () => {
 
     mockedRunGapClassification.mockRejectedValue(failure);
 
-    await expect(runAnalysisPipeline(42)).rejects.toThrow(
+    await expect(runAnalysisPipeline(42, 1)).rejects.toThrow(
       "classification failed",
     );
 
@@ -296,6 +297,7 @@ describe("runAnalysisPipeline", () => {
 
     expect(mockedFailRunAtStage).toHaveBeenCalledWith(
       42,
+      1,
       "classification",
       failure,
     );
@@ -310,11 +312,11 @@ describe("runAnalysisPipeline", () => {
 
     const events: string[] = [];
 
-    mockedStartAnalysisStage.mockImplementation(async (_runId, stage) => {
+    mockedStartAnalysisStage.mockImplementation(async (_runId, _accountId, stage) => {
       events.push(`start:${stage}`);
     });
 
-    mockedCompleteAnalysisStage.mockImplementation(async (_runId, stage) => {
+    mockedCompleteAnalysisStage.mockImplementation(async (_runId, _accountId, stage) => {
       events.push(`complete:${stage}`);
     });
 
@@ -328,7 +330,7 @@ describe("runAnalysisPipeline", () => {
       };
     });
 
-    await runAnalysisPipeline(42);
+    await runAnalysisPipeline(42, 1);
 
     const clusteringStart = events.indexOf("start:clustering");
     const clusteringExecute = events.indexOf("execute:clustering");
@@ -345,7 +347,7 @@ describe("runAnalysisPipeline", () => {
       }),
     );
 
-    await runAnalysisPipeline(42);
+    await runAnalysisPipeline(42, 1);
 
     expect(mockedIngestTickets).toHaveBeenCalledWith(
       1,
@@ -358,7 +360,7 @@ describe("runAnalysisPipeline", () => {
   it("passes the account subdomain to Zendesk ingestion stages", async () => {
     mockedGetAnalysisRun.mockResolvedValue(makeRun());
 
-    await runAnalysisPipeline(42);
+    await runAnalysisPipeline(42, 1);
 
     expect(mockedIngestTickets).toHaveBeenCalledWith(
       1,
@@ -380,7 +382,7 @@ describe("runAnalysisPipeline", () => {
       new Error("clustering failed"),
     );
 
-    await expect(runAnalysisPipeline(42)).rejects.toThrow(
+    await expect(runAnalysisPipeline(42, 1)).rejects.toThrow(
       "clustering failed",
     );
 
@@ -392,7 +394,7 @@ describe("runAnalysisPipeline", () => {
   it("runs every declared analysis stage exactly once for a fresh run", async () => {
     mockedGetAnalysisRun.mockResolvedValue(makeRun());
 
-    await runAnalysisPipeline(42);
+    await runAnalysisPipeline(42, 1);
 
     expect(mockedStartAnalysisStage).toHaveBeenCalledTimes(
       ANALYSIS_STAGES.length,
@@ -405,11 +407,13 @@ describe("runAnalysisPipeline", () => {
     for (const stage of ANALYSIS_STAGES) {
       expect(mockedStartAnalysisStage).toHaveBeenCalledWith(
         42,
+        1,
         stage,
       );
 
       expect(mockedCompleteAnalysisStage).toHaveBeenCalledWith(
         42,
+        1,
         stage,
       );
     }

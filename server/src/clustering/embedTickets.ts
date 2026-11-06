@@ -32,7 +32,7 @@ export async function embedTickets(
 
     const { maskedText } = maskPII(rawText);
     const { vector } = await withRetry(() => provider.embed({ text: maskedText }));
-    await updateTicketEmbedding(ticket.id, vector);
+    await updateTicketEmbedding(ticket.id, zendeskAccountId, vector);
     embedded++;
   }
 

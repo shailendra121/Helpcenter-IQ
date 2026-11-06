@@ -157,13 +157,15 @@ export async function getEmbeddedTicketsForRun(
 
 export async function updateTicketEmbedding(
   ticketId: number,
+  zendeskAccountId: number,
   embedding: number[]
 ): Promise<void> {
   await pool.query(
     `UPDATE tickets
      SET embedding = $1
-     WHERE id = $2`,
-    [`[${embedding.join(",")}]`, ticketId]
+     WHERE id = $2
+       AND zendesk_account_id = $3`,
+    [`[${embedding.join(",")}]`, ticketId, zendeskAccountId]
   );
 }
 

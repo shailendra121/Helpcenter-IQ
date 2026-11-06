@@ -39,11 +39,14 @@ export async function createRecommendation(
  */
 export async function deleteRecommendationsForGap(
   gapId: number,
+  zendeskAccountId: number,
   client?: PoolClient
 ): Promise<void> {
   const db = client ?? pool;
-
-  await db.query(`DELETE FROM gap_recommendations WHERE gap_id = $1`, [gapId]);
+  await db.query(
+    `DELETE FROM gap_recommendations WHERE gap_id = $1 AND zendesk_account_id = $2`,
+    [gapId, zendeskAccountId],
+  );
 }
 
 export interface GapRecommendationRow {

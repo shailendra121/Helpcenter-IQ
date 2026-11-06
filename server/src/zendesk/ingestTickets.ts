@@ -59,7 +59,7 @@ export async function ingestTickets(
   const windowStart = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
   if (resumeRunId) {
-    const existingRun = await getAnalysisRun(resumeRunId);
+    const existingRun = await getAnalysisRun(resumeRunId, zendeskAccountId);
     if (!existingRun) {
       throw new Error(`No analysis_run found with id ${resumeRunId} to resume`);
     }
@@ -104,7 +104,7 @@ export async function ingestTickets(
 
       // Persist the cursor after every successfully processed page.
       // This allows HCIQ-14 to resume from the last successful page.
-      await updateAnalysisRunCursor(runId, page.after_cursor);
+      await updateAnalysisRunCursor(runId, zendeskAccountId, page.after_cursor);
 
       endOfStream = page.end_of_stream;
     }
@@ -113,7 +113,7 @@ export async function ingestTickets(
     // When resumeRunId is provided, this function is running as
     // the ticket-ingestion stage and must NOT complete the whole run.
     if (!resumeRunId) {
-      await completeAnalysisRun(runId);
+      await completeAnalysisRun(runId, zendeskAccountId);
     }
 
     return { runId, ticketCount };
@@ -121,7 +121,7 @@ export async function ingestTickets(
     // HCIQ-14 owns stage-level failure handling when this function
     // is called with an existing run.
     if (!resumeRunId) {
-      await failAnalysisRun(runId);
+      await failAnalysisRun(runId, zendeskAccountId);
     }
 
     throw err;

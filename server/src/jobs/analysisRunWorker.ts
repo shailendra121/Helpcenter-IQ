@@ -26,7 +26,7 @@ export async function processNextAnalysisRun(): Promise<boolean> {
   );
 
   try {
-    await runAnalysisPipeline(run.id);
+    await runAnalysisPipeline(run.id, run.zendesk_account_id);
 
     console.log(
       `[analysis-worker] Run ${run.id} completed successfully`,
@@ -39,10 +39,10 @@ export async function processNextAnalysisRun(): Promise<boolean> {
 
     // The pipeline records stage-level failures.
     // This is a safety net for failures that happen outside a stage.
-    const currentRun = await getAnalysisRun(run.id);
+    const currentRun = await getAnalysisRun(run.id, run.zendesk_account_id);
 
     if (currentRun?.status !== "failed") {
-      await failAnalysisRun(run.id);
+      await failAnalysisRun(run.id, run.zendesk_account_id);
     }
   }
 
