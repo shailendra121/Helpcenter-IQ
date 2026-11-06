@@ -155,18 +155,13 @@ export async function getLatestRunForAccount(
   return result.rows[0] ?? null;
 }
 
-/**
- * Recovers runs left in the running state after a process restart.
- *
- * HCIQ-14 MVP uses a single in-process worker, so on startup all
- * running runs are assumed to belong to the stopped worker and are
- * safely re-queued for recovery.
- *
- * Multi-worker / multi-replica deployment is not supported by this
- * recovery strategy.
- */
+// A worker job can run up to ~1 hour, and executions can overlap (Cloud
+// Scheduler every 10 min + API-triggered on queue). So re-queue only runs
+// that have clearly gone stale — started longer ago than the job's max
+// lifetime — never a run another execution is actively processing.
+const STALE_RUN_MINUTES = 70; // > the 60-minute worker job timeout
 
-export async function recoverInterruptedRuns(): Promise<number> {
+export async function recoverStaleRuns(): Promise<number> {
   const result = await pool.query(
     `UPDATE analysis_runs
      SET
@@ -175,7 +170,9 @@ export async function recoverInterruptedRuns(): Promise<number> {
        error_stage = NULL,
        error_message = NULL
      WHERE status = 'running'
+       AND started_at < now() - ($1 || ' minutes')::interval
      RETURNING id`,
+    [String(STALE_RUN_MINUTES)],
   );
 
   return result.rowCount ?? 0;
