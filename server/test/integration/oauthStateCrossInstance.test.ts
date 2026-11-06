@@ -3,39 +3,38 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { pool } from "../../src/db/pool.js";
 
-const OAUTH_MOCK = () => ({
-  getOAuthClient: () => ({
-    buildAuthorizeUrl: (_sub: string, _redirect: string, state: string) =>
-      `https://zendesk.example/oauth?state=${encodeURIComponent(state)}`,
-    exchangeCodeForToken: vi.fn().mockResolvedValue({
-      accessToken: "a",
-      refreshToken: "r",
-      scope: "read write",
-      expiresAt: new Date(Date.now() + 3600_000),
-    }),
-  }),
-});
-
-const ACCOUNT_MOCK = async () => {
-  const actual = await vi.importActual<
-    typeof import("../../src/db/models/zendeskAccounts.js")
-  >("../../src/db/models/zendeskAccounts.js");
-  return {
-    ...actual,
-    upsertZendeskAccount: vi.fn().mockResolvedValue({ id: 1 }),
-    setAccountZafSecret: vi.fn().mockResolvedValue(undefined),
-  };
-};
-
-const SETSECRET_MOCK = () => ({
-  setAppJwtSecret: vi.fn().mockResolvedValue(undefined),
-});
-
 async function loadApp() {
   vi.resetModules();
-  vi.doMock("../../src/auth/getOAuthClient.js", OAUTH_MOCK);
-  vi.doMock("../../src/db/models/zendeskAccounts.js", ACCOUNT_MOCK);
-  vi.doMock("../../src/zendesk/setAppJwtSecret.js", SETSECRET_MOCK);
+  process.env.ZENDESK_OAUTH_CLIENT_ID = "test-client-id";
+  process.env.ZENDESK_OAUTH_CLIENT_SECRET = "test-client-secret";
+  process.env.APP_ORIGIN = "https://test.example";
+
+  vi.doMock("../../src/auth/getOAuthClient.js", () => ({
+    getOAuthClient: () => ({
+      buildAuthorizeUrl: (_s: string, _r: string, state: string) =>
+        `https://zendesk.example/oauth?state=${encodeURIComponent(state)}`,
+      exchangeCodeForToken: vi.fn().mockResolvedValue({
+        accessToken: "a",
+        refreshToken: "r",
+        scope: "read write",
+        expiresAt: new Date(Date.now() + 3600_000),
+      }),
+    }),
+  }));
+  vi.doMock("../../src/db/models/zendeskAccounts.js", async () => {
+    const actual = await vi.importActual<
+      typeof import("../../src/db/models/zendeskAccounts.js")
+    >("../../src/db/models/zendeskAccounts.js");
+    return {
+      ...actual,
+      upsertZendeskAccount: vi.fn().mockResolvedValue({ id: 1 }),
+      setAccountZafSecret: vi.fn().mockResolvedValue(undefined),
+    };
+  });
+  vi.doMock("../../src/zendesk/setAppJwtSecret.js", () => ({
+    setAppJwtSecret: vi.fn().mockResolvedValue(undefined),
+  }));
+
   const mod = await import("../../src/app.js");
   return mod.default;
 }
