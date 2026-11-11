@@ -10,20 +10,14 @@ export const ANALYSIS_STAGES = [
 
 export type AnalysisStage = (typeof ANALYSIS_STAGES)[number];
 
-export type AnalysisRunStatus =
-  | "queued"
-  | "running"
-  | "completed"
-  | "failed";
+export type AnalysisRunStatus = "queued" | "running" | "completed" | "failed";
 
 export interface StageTimestamp {
   started_at?: string;
   completed_at?: string;
 }
 
-export type StageTimestamps = Partial<
-  Record<AnalysisStage, StageTimestamp>
->;
+export type StageTimestamps = Partial<Record<AnalysisStage, StageTimestamp>>;
 
 export interface AnalysisRunRow {
   id: number;
@@ -31,6 +25,7 @@ export interface AnalysisRunRow {
   window_days: number;
   status: AnalysisRunStatus;
   started_at: Date | null;
+  claimed_at?: Date | null;
   completed_at: Date | null;
   ingestion_cursor: string | null;
 
@@ -56,18 +51,19 @@ export class ActiveRunExistsError extends Error {
  */
 export async function createAnalysisRun(
   zendeskAccountId: number,
-  windowDays: number
+  windowDays: number,
 ): Promise<AnalysisRunRow> {
   const result = await pool.query<AnalysisRunRow>(
     `INSERT INTO analysis_runs (
       zendesk_account_id,
       window_days,
       status,
-      started_at
+      started_at,
+      claimed_at
     )
-    VALUES ($1, $2, 'running', now())
+    VALUES ($1, $2, 'running', now(), now())
     RETURNING *`,
-    [zendeskAccountId, windowDays]
+    [zendeskAccountId, windowDays],
   );
 
   return result.rows[0];
@@ -83,7 +79,7 @@ export async function createAnalysisRun(
  */
 export async function createQueuedRun(
   zendeskAccountId: number,
-  windowDays: number
+  windowDays: number,
 ): Promise<AnalysisRunRow> {
   try {
     const result = await pool.query<AnalysisRunRow>(
@@ -94,7 +90,7 @@ export async function createQueuedRun(
       )
       VALUES ($1, $2, 'queued')
       RETURNING *`,
-      [zendeskAccountId, windowDays]
+      [zendeskAccountId, windowDays],
     );
 
     return result.rows[0];
@@ -118,7 +114,7 @@ export async function createQueuedRun(
  * Returns the currently active run for an account, if one exists.
  */
 export async function getActiveRunForAccount(
-  zendeskAccountId: number
+  zendeskAccountId: number,
 ): Promise<AnalysisRunRow | null> {
   const result = await pool.query<AnalysisRunRow>(
     `SELECT *
@@ -127,7 +123,7 @@ export async function getActiveRunForAccount(
        AND status IN ('queued', 'running')
      ORDER BY id DESC
      LIMIT 1`,
-    [zendeskAccountId]
+    [zendeskAccountId],
   );
 
   return result.rows[0] ?? null;
@@ -141,7 +137,7 @@ export async function getActiveRunForAccount(
  * remain visible after a page reload.
  */
 export async function getLatestRunForAccount(
-  zendeskAccountId: number
+  zendeskAccountId: number,
 ): Promise<AnalysisRunRow | null> {
   const result = await pool.query<AnalysisRunRow>(
     `SELECT *
@@ -149,24 +145,19 @@ export async function getLatestRunForAccount(
      WHERE zendesk_account_id = $1
      ORDER BY id DESC
      LIMIT 1`,
-    [zendeskAccountId]
+    [zendeskAccountId],
   );
 
   return result.rows[0] ?? null;
 }
 
-/**
- * Recovers runs left in the running state after a process restart.
- *
- * HCIQ-14 MVP uses a single in-process worker, so on startup all
- * running runs are assumed to belong to the stopped worker and are
- * safely re-queued for recovery.
- *
- * Multi-worker / multi-replica deployment is not supported by this
- * recovery strategy.
- */
+// A worker job can run up to ~1 hour, and executions can overlap (Cloud
+// Scheduler every 10 min + API-triggered on queue). So re-queue only runs
+// that have clearly gone stale — started longer ago than the job's max
+// lifetime — never a run another execution is actively processing.
+const STALE_RUN_MINUTES = 70; // > the 60-minute worker job timeout
 
-export async function recoverInterruptedRuns(): Promise<number> {
+export async function recoverStaleRuns(): Promise<number> {
   const result = await pool.query(
     `UPDATE analysis_runs
      SET
@@ -175,7 +166,9 @@ export async function recoverInterruptedRuns(): Promise<number> {
        error_stage = NULL,
        error_message = NULL
      WHERE status = 'running'
+       AND COALESCE(claimed_at, started_at) < now() - ($1 || ' minutes')::interval
      RETURNING id`,
+    [String(STALE_RUN_MINUTES)],
   );
 
   return result.rowCount ?? 0;
@@ -194,7 +187,8 @@ export async function claimNextQueuedRun(): Promise<AnalysisRunRow | null> {
      UPDATE analysis_runs AS ar
      SET
        status = 'running',
-       started_at = COALESCE(ar.started_at, now())
+       started_at = COALESCE(ar.started_at, now()) ,
+       claimed_at = now() 
      FROM next_run
      WHERE ar.id = next_run.id
      RETURNING ar.*`,
@@ -265,8 +259,7 @@ export async function failRunAtStage(
   stage: AnalysisStage,
   error: unknown,
 ): Promise<void> {
-  const errorMessage =
-    error instanceof Error ? error.message : String(error);
+  const errorMessage = error instanceof Error ? error.message : String(error);
 
   await pool.query(
     `UPDATE analysis_runs
