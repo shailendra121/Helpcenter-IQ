@@ -4,6 +4,7 @@ import { pool } from "../../src/db/pool.js";
 import {
   createAnalysisRun,
   recoverStaleRuns,
+  claimNextQueuedRun,
 } from "../../src/db/models/analysisRuns.js";
 import { upsertZendeskAccount } from "../../src/db/models/zendeskAccounts.js";
 
@@ -80,15 +81,46 @@ describe("recoverStaleRuns — stale-only by claimed_at (real database)", () => 
     expect(row.rows[0].status).toBe("running"); // untouched
   });
 
-  it("leaves a recovered-then-reclaimed run alone (claimed_at is fresh)", async () => {
+    it("leaves a recovered-then-reclaimed run alone (real claim refreshes claimed_at)", async () => {
     const acc = await makeAccount();
-    // Original start was long ago, but it was just re-claimed (claimed_at fresh).
     const run = await createAnalysisRun(acc, 30);
+
+    // Make it the ONLY claimable row, with an old original start.
+    await pool.query(
+      `UPDATE analysis_runs
+       SET status = 'queued',
+           started_at = now() - interval '200 minutes',
+           claimed_at = NULL
+       WHERE id = $1`,
+      [run.id],
+    );
+    // Park any other queued rows so claimNextQueuedRun picks ours.
+    await pool.query(
+      `UPDATE analysis_runs SET status = 'completed'
+       WHERE status = 'queued' AND id <> $1`,
+      [run.id],
+    );
+
+    const claimed = await claimNextQueuedRun();
+    expect(claimed?.id).toBe(run.id);
+
+    await recoverStaleRuns();
+
+    const row = await pool.query(
+      "SELECT status FROM analysis_runs WHERE id = $1",
+      [run.id],
+    );
+    expect(row.rows[0].status).toBe("running"); // fresh claimed_at → not re-queued
+  });
+    it("recovers a running row with NULL claimed_at and an old started_at", async () => {
+    const acc = await makeAccount();
+    const run = await createAnalysisRun(acc, 30);
+    // Simulate a pre-migration / standalone run: running, old start, NO claim.
     await pool.query(
       `UPDATE analysis_runs
        SET status = 'running',
-           started_at = now() - interval '200 minutes', -- old original start
-           claimed_at = now() - interval '2 minutes'    -- but just re-claimed
+           started_at = now() - interval '120 minutes',
+           claimed_at = NULL
        WHERE id = $1`,
       [run.id],
     );
@@ -99,7 +131,6 @@ describe("recoverStaleRuns — stale-only by claimed_at (real database)", () => 
       "SELECT status FROM analysis_runs WHERE id = $1",
       [run.id],
     );
-    // Must NOT be re-queued — this is the double-run bug the reviewer caught.
-    expect(row.rows[0].status).toBe("running");
+    expect(row.rows[0].status).toBe("queued"); // recovered via COALESCE fallback
   });
 });

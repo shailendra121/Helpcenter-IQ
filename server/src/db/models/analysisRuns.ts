@@ -58,9 +58,10 @@ export async function createAnalysisRun(
       zendesk_account_id,
       window_days,
       status,
-      started_at
+      started_at,
+      claimed_at
     )
-    VALUES ($1, $2, 'running', now())
+    VALUES ($1, $2, 'running', now(), now())
     RETURNING *`,
     [zendeskAccountId, windowDays],
   );
@@ -165,7 +166,7 @@ export async function recoverStaleRuns(): Promise<number> {
        error_stage = NULL,
        error_message = NULL
      WHERE status = 'running'
-       AND claimed_at < now() - ($1 || ' minutes')::interval
+       AND COALESCE(claimed_at, started_at) < now() - ($1 || ' minutes')::interval
      RETURNING id`,
     [String(STALE_RUN_MINUTES)],
   );
