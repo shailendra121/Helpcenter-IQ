@@ -1,7 +1,7 @@
 # ADR-0009: Stateless server, externalized state (multi-instance readiness)
 
 - Status: Accepted
-- Date: 2026-11-02
+- Date: 2026-11-05
 - Jira: HCIQ-21
 
 ## Context
@@ -47,6 +47,9 @@ re-derivable). Specifically:
 - New request-serving code must not rely on module-level mutable state for
   correctness across requests. Anything that must persist goes to the DB;
   anything cached in memory must be bounded and safely re-derivable.
-- `recoverInterruptedRuns()` re-queues all `running` runs on worker startup —
-  valid only for the single-execution worker job; a future multi-worker setup
-  (out of scope here) would need per-worker ownership/leasing.
+- The worker runs as a single-shot Cloud Run Job, and executions can overlap
+  (Cloud Scheduler every 10 min, plus an API-triggered run when one is queued).
+  On startup each execution calls `recoverStaleRuns()`, which re-queues only
+  runs whose last claim (`claimed_at`) is older than the job timeout. A run
+  another execution is actively processing keeps a fresh `claimed_at`, so it is
+  never re-queued and cannot run twice. Proven by `recoverStaleRuns.test.ts`.
